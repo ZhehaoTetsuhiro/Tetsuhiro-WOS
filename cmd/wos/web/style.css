@@ -1,0 +1,87 @@
+:root {
+  --bg: #10141a; --panel: #171d26; --panel2: #1e2632; --fg: #dbe4f0;
+  --accent: #4da3ff; --border: #2b3646; --warn: #ffb454; --err: #ff6b6b;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 13px/1.5 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+  pointer-events: none; /* 纯键盘操作：完全禁用鼠标 */
+}
+header {
+  display: flex; align-items: center; gap: 16px; padding: 6px 14px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 15px; margin: 0; letter-spacing: 1px; }
+.status { flex: 1; color: #9fb3cc; }
+main { flex: 1; display: flex; gap: 10px; padding: 10px; min-height: 0; }
+aside { width: 320px; min-width: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+#center { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+h2 { font-size: 13px; margin: 0 0 8px; color: var(--accent); letter-spacing: 1px; }
+
+button, select, input {
+  font: inherit; color: var(--fg); background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px;
+}
+button { cursor: pointer; }
+button:hover, select:hover { border-color: var(--accent); }
+:focus, :focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 5px;
+}
+
+/* element list */
+.el { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  margin: 2px 0; padding: 5px 8px; border-radius: 5px; background: var(--panel2); }
+.el.sel { background: #23405e; border-color: var(--accent); }
+.el .tag { color: #8fa5c0; font-size: 11px; margin-left: auto; }
+#breadcrumb { font-size: 12px; color: #9fb3cc; margin-bottom: 6px; min-height: 1.2em; }
+#breadcrumb button { padding: 0 6px; font-size: 12px; }
+
+/* params */
+.prow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.prow label { width: 130px; flex: none; text-align: right; font-size: 12px; color: #b9c8dc; }
+.prow input[type=number] { flex: 1; min-width: 90px; }
+.prow input[type=text] { flex: 1; }
+.prow select { flex: 1; }
+.hint { color: #75879f; font-size: 11px; margin: 6px 0 0; }
+
+/* canvas */
+#viewTabs { display: flex; gap: 6px; flex-wrap: wrap; }
+#viewTabs button.active { background: #23405e; border-color: var(--accent); }
+#canvasWrap { position: relative; flex: 1; min-height: 240px; display: flex; align-items: center; justify-content: center;
+  background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+#view { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+#prof { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#planeNav { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
+  background: rgba(16,20,26,.85); border-radius: 6px; padding: 4px; }
+#stats { font-size: 12px; color: #b9c8dc; white-space: pre-line; }
+#stats b { color: var(--fg); }
+
+/* right column */
+#warnings .w { background: #3a2d18; border-left: 3px solid var(--warn); padding: 4px 8px; margin: 4px 0; border-radius: 4px; font-size: 12px; }
+#warnings .errbox { background: #3a1818; border-left: 3px solid var(--err); padding: 4px 8px; border-radius: 4px; }
+
+
+footer { background: var(--panel); border-top: 1px solid var(--border); padding: 5px 14px; font-size: 11px; color: #75879f; }
+
+/* overlays */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
+/* hidden 属性必须压过上面的 display:flex，否则三个对话框在页面加载时全部可见 */
+.overlay[hidden] { display: none; }
+.dialog { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  max-width: 640px; width: 90%; max-height: 85vh; overflow-y: auto; }
+.dialog.wide { max-width: 980px; }
+.dialog h2 { margin-top: 0; }
+#helpTable { border-collapse: collapse; width: 100%; }
+#helpTable td { border-bottom: 1px solid var(--border); padding: 4px 8px; font-size: 12px; }
+#helpTable td:first-child { white-space: nowrap; color: var(--accent); font-weight: 600; }
+#insList { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; max-height: 50vh; overflow-y: auto; }
+#insList button { text-align: left; }
+#jsonText { width: 100%; height: 60vh; background: #0a0d12; color: #c8e6c9; font-family: ui-monospace, Consolas, monospace; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+#jsonMsg { color: var(--err); min-height: 1.2em; font-size: 12px; }
+.row { display: flex; gap: 8px; margin-top: 8px; }
+.row button { flex: 1; }
+@media (max-width: 1100px) { aside { width: 260px; } }

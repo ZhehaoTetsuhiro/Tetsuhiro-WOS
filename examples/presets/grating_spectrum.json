@@ -1,0 +1,43 @@
+{
+  "grid": {
+    "size": 1024,
+    "width": 0.008
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "plane",
+    "params": {
+      "power": 0.001
+    }
+  },
+  "elements": [
+    {
+      "type": "grating",
+      "params": {
+        "kind": "phase_sin",
+        "modulation": 2,
+        "period": 0.00002
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 1,
+        "method": "fraunhofer"
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "衍射级"
+      }
+    }
+  ]
+}

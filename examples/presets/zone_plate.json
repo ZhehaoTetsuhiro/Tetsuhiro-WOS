@@ -1,0 +1,42 @@
+{
+  "grid": {
+    "size": 1024,
+    "width": 0.004
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "plane",
+    "params": {
+      "power": 0.001
+    }
+  },
+  "elements": [
+    {
+      "type": "zone_plate",
+      "params": {
+        "f": 0.05,
+        "kind": "phase",
+        "radius": 0.002
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.05
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "焦点"
+      }
+    }
+  ]
+}

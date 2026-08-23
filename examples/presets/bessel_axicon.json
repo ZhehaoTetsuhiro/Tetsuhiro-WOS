@@ -1,0 +1,42 @@
+{
+  "grid": {
+    "size": 512,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "gaussian",
+    "params": {
+      "power": 0.001,
+      "waist": 0.003
+    }
+  },
+  "elements": [
+    {
+      "type": "axicon",
+      "params": {
+        "alpha": 0.02,
+        "index": 1.5
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.2
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "贝塞尔区"
+      }
+    }
+  ]
+}

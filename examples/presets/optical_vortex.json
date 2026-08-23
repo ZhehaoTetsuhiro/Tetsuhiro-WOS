@@ -1,0 +1,41 @@
+{
+  "grid": {
+    "size": 512,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "gaussian",
+    "params": {
+      "power": 0.001,
+      "waist": 0.002
+    }
+  },
+  "elements": [
+    {
+      "type": "spiral_phase",
+      "params": {
+        "charge": 3
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.3
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "涡旋光束"
+      }
+    }
+  ]
+}

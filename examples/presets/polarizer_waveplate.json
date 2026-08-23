@@ -1,0 +1,37 @@
+{
+  "grid": {
+    "size": 512,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": true,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "gaussian",
+    "params": {
+      "polarization": "d",
+      "power": 0.001,
+      "waist": 0.002
+    }
+  },
+  "elements": [
+    {
+      "type": "retarder",
+      "params": {
+        "axis": 0,
+        "retardance": 1.5708
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "经过 QWP（45°线偏振→圆偏振）"
+      }
+    }
+  ]
+}

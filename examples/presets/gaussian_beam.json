@@ -1,0 +1,47 @@
+{
+  "grid": {
+    "size": 1024,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "gaussian",
+    "params": {
+      "power": 0.001,
+      "waist": 0.001
+    }
+  },
+  "elements": [
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.05
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "z=0.05m"
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.25
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "z=0.3m"
+      }
+    }
+  ]
+}

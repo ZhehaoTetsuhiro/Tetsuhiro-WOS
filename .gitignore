@@ -1,0 +1,42 @@
+# ---- 编译产物 / 构建缓存（不纳入版本控制）----
+
+# 已编译的可执行文件（根目录主程序）
+/wos
+/wos.exe
+
+# Go 构建缓存
+.gocache/
+
+# Go 通用构建产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.o
+*.obj
+*.a
+
+# 测试与覆盖率输出
+*.prof
+coverage.out
+
+# 生成的 PNG/数据输出（示例运行产生）
+*.png
+*.bin
+
+# ---- Go 环境 ----
+go.work
+go.work.sum
+vendor/
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

@@ -1,0 +1,51 @@
+{
+  "grid": {
+    "size": 1024,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "plane",
+    "params": {
+      "power": 0.001
+    }
+  },
+  "elements": [
+    {
+      "type": "lens",
+      "params": {
+        "aperture": 0.003,
+        "f": 0.3
+      }
+    },
+    {
+      "type": "zernike",
+      "params": {
+        "c11": 1,
+        "c4": 0.5,
+        "radius": 0.003
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.3
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "像差焦斑",
+        "strehl_aperture": 0.003,
+        "strehl_distance": 0.3
+      }
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "grid": {
+    "size": 512,
+    "width": 0.01
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "gaussian",
+    "params": {
+      "power": 0.001,
+      "waist": 0.002
+    }
+  },
+  "elements": [
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.02
+      }
+    },
+    {
+      "type": "beamsplitter",
+      "params": {
+        "reflected_arm": {
+          "elements": [
+            {
+              "params": {
+                "distance": 0.04
+              },
+              "type": "propagate"
+            }
+          ]
+        },
+        "reflectivity": 0.5
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 0.04
+      }
+    },
+    {
+      "type": "combiner",
+      "params": {
+        "outputs": [
+          {
+            "label": "端口1",
+            "weights": [
+              {
+                "arm": "main",
+                "im": 0,
+                "re": 0.70710678
+              },
+              {
+                "arm": "bs0",
+                "im": 0.70710678,
+                "re": 0
+              }
+            ]
+          },
+          {
+            "label": "端口2",
+            "weights": [
+              {
+                "arm": "main",
+                "im": 0.70710678,
+                "re": 0
+              },
+              {
+                "arm": "bs0",
+                "im": 0,
+                "re": 0.70710678
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

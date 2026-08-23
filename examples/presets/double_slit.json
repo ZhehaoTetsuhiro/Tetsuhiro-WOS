@@ -1,0 +1,44 @@
+{
+  "grid": {
+    "size": 1024,
+    "width": 0.02
+  },
+  "wavelength": 6.328e-7,
+  "polarized": false,
+  "method": "asm",
+  "evanescent": "decay",
+  "bandlimit": {
+    "fraction": 0.9,
+    "sigma": 0.05
+  },
+  "source": {
+    "type": "plane",
+    "params": {
+      "power": 0.001
+    }
+  },
+  "elements": [
+    {
+      "type": "aperture",
+      "params": {
+        "height": 0.02,
+        "separation": 0.001,
+        "shape": "double_slit",
+        "width": 0.0001
+      }
+    },
+    {
+      "type": "propagate",
+      "params": {
+        "distance": 1,
+        "method": "fraunhofer"
+      }
+    },
+    {
+      "type": "sensor",
+      "params": {
+        "label": "干涉条纹"
+      }
+    }
+  ]
+}
