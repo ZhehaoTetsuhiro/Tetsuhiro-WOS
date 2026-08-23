@@ -1,13 +1,13 @@
 # 接入说明（docs/INTEGRATION.md）
 
-WOS 提供两种接入方式：**Go 库直接嵌入**（推荐给内核开发者/高吞吐场景）与 **HTTP API**（任意语言）。以下均给出最小可运行示例。
+Tetsuhiro WOS 提供两种接入方式：**Go 库直接嵌入**（推荐给内核开发者/高吞吐场景）与 **HTTP API**（任意语言）。以下均给出最小可运行示例。
 
 ## 1. Go 库嵌入（内核优先）
 
-模块名 wos，零第三方依赖：
+模块名 twos，零第三方依赖：
 
-    require wos v0.0.0
-    replace wos => ../WOS        // 或直接把源码放入你的工程
+    require twos v0.0.0
+    replace twos => ../Tetsuhiro-WOS        // 或直接把源码放入你的工程
 
 最小程序（透镜聚焦 + 指标 + PNG 输出）：
 
@@ -16,8 +16,8 @@ WOS 提供两种接入方式：**Go 库直接嵌入**（推荐给内核开发者
     import (
         "fmt"
         "log"
-        "wos/optics"
-        "wos/server" // 可选：PNG 可视化助手
+        "twos/optics"
+        "twos/server" // 可选：PNG 可视化助手
     )
 
     func main() {

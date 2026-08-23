@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log"
 
-	"wos/optics"
+	"twos/optics"
 )
 
 func mz(armExtra float64) *optics.Result {

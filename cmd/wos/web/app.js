@@ -1,5 +1,5 @@
 "use strict";
-/* WOS 波动光学模拟器 — 纯键盘操作前端（鼠标已禁用）。
+/* Tetsuhiro WOS 波动光学模拟器 — 纯键盘操作前端（鼠标已禁用）。
  * 全部控件为原生表单元素（Tab/方向键/Enter 原生可用），另提供全局快捷键。
  * 焦点位于表单控件内时键盘完全交还原生行为（数字框可输入科学计数法 e/E、
  * ↑/↓ 按步长步进），全局快捷键（f 定位、q/e 平面、n 新建、o 打开、s 保存等）
@@ -789,7 +789,7 @@ function openJson() {
 function applyJson() {
   try {
     const cfg = normalizeConfig(JSON.parse($("#jsonText").value));
-    if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.elements)) throw new Error("缺少 elements 数组，不是有效的 WOS 配置");
+    if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.elements)) throw new Error("缺少 elements 数组，不是有效的 Tetsuhiro WOS 配置");
     S.config = cfg;
     S.ctx = []; S.elIdx = 0; S.planeIdx = 0; S.meta = null; S.runId = null;
     S.cache.clear();
@@ -857,7 +857,7 @@ function openFile(file) {
   rd.onload = () => {
     try {
       const cfg = normalizeConfig(JSON.parse(String(rd.result)));
-      if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.elements)) throw new Error("缺少 elements 数组，不是有效的 WOS 配置");
+      if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.elements)) throw new Error("缺少 elements 数组，不是有效的 Tetsuhiro WOS 配置");
       S.config = cfg;
       resetViewState();
       renderAll();

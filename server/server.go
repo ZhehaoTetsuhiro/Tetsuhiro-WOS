@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"wos/optics"
+	"twos/optics"
 )
 
 // RunStatus values.

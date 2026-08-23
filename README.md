@@ -1,4 +1,4 @@
-# WOS — 波动光学模拟器（Wave Optics Simulator）
+# Tetsuhiro WOS — 波动光学模拟器（Wave Optics Simulator）
 
 科学、准确性优先的波动光学仿真内核（Golang）+ 纯键盘操作 Web GUI。
 
@@ -7,7 +7,7 @@
 - **物理完备性**：琼斯矢量偏振（2 分量）、折返光路（反射镜/迈克尔逊）、分束臂与相干合束（马赫-曾德尔等干涉仪）、功率归一化（SI 单位）、质心/RMS/Strehl 等指标、一维剖面。
 - **精度验证**：go test ./optics/ 内含 19 项物理测试——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证等。
 - **GUI**：浏览器页面，**纯键盘操作、鼠标已禁用**（Tab/方向键/快捷键，见 docs/GUI.md）；支持 n 新建、o 打开、s 保存配置 JSON 文件。
-- **接入**：内核即库（import "wos/optics"），HTTP API 供任意语言调用。详见 docs/INTEGRATION.md（以内核开发为主）。
+- **接入**：内核即库（import "twos/optics"），HTTP API 供任意语言调用。详见 docs/INTEGRATION.md（以内核开发为主）。
 
 ## 快速开始
 

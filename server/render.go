@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"os"
 
-	"wos/optics"
+	"twos/optics"
 )
 
 // ---- colormaps -------------------------------------------------------------

@@ -12,7 +12,7 @@ import (
 	"log"
 	"net/http"
 
-	"wos/server"
+	"twos/server"
 )
 
 //go:embed web
@@ -32,7 +32,7 @@ func main() {
 	mux.Handle("/api/", srv.Handler())
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	log.Printf("WOS 波动光学模拟器 http://localhost%s", *addr)
+	log.Printf("Tetsuhiro WOS 波动光学模拟器 http://localhost%s", *addr)
 	log.Printf("  内核: 角谱法/Fresnel/Fraunhofer 传播 + 可扩展元件注册表（详见 docs/）")
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Fatal(err)

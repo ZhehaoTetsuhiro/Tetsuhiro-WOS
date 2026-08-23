@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WOS 内核的 Python 客户端示例（仅标准库 + 可选 numpy）。
+"""Tetsuhiro WOS 内核的 Python 客户端示例（仅标准库 + 可选 numpy）。
 
 用法:
     python3 examples/python_client.py http://localhost:8080

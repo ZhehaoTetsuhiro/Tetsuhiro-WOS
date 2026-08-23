@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"log"
 
-	"wos/optics"
-	"wos/server"
+	"twos/optics"
+	"twos/server"
 )
 
 func main() {
