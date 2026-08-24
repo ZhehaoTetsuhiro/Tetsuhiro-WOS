@@ -47,12 +47,23 @@ function curList() {
   return arr;
 }
 function curArmId() {
-  return S.ctx.map((c) => "bs" + c.bsIndex).join(".");
+  return S.ctx.map((c) => c.label).join(".");
 }
 function bsChildrenIn(list) {
   const out = [];
   list.forEach((el, i) => { if (el.type === "beamsplitter") out.push("bs" + out.length); });
   return out;
+}
+// 进入当前选中分束器的反射臂子光路（与「编辑反射臂光路 →」按钮一致）。
+function enterReflectedArm() {
+  const list = curList();
+  const i = S.elIdx;
+  const el = list[i];
+  if (!el || el.type !== "beamsplitter") return;
+  const nBs = bsChildrenIn(list.slice(0, i)).length;
+  S.ctx.push({ bsIndex: i, label: "bs" + nBs });
+  S.elIdx = 0;
+  renderAll();
 }
 function docFor(type) { return S.catalog.elements.find((d) => d.type === type); }
 function srcDocFor(type) { return S.catalog.sources.find((d) => d.type === type); }
@@ -203,14 +214,8 @@ function renderParams() {
       if (pd.key === "reflected_arm") {
         const b = document.createElement("button");
         b.textContent = "编辑反射臂光路 →";
-        b.addEventListener("click", () => {
-          const list2 = curList();
-          const i = S.elIdx;
-          const nBs = bsChildrenIn(list2.slice(0, i)).length;
-          S.ctx.push({ bsIndex: i, label: "bs" + nBs });
-          S.elIdx = 0;
-          renderAll();
-        });
+        b.title = "进入该分束器的反射臂子光路（Enter 直接进入，Esc 返回）";
+        b.addEventListener("click", () => { enterReflectedArm(); });
         row.appendChild(b);
       } else if (pd.key === "outputs") {
         const b = document.createElement("button");
@@ -751,8 +756,8 @@ const HELP_ROWS = [
   ["Shift+↑ / Shift+↓", "移动元件在光路中的顺序"],
   ["i", "在当前元件后插入新元件（输入文字过滤，Enter 插入）"],
   ["d / Delete", "删除当前元件"],
-  ["Enter / 空格", "运行模拟（焦点在按钮上时触发该按钮；输入框内 Enter=确认参数）"],
-  ["Ctrl+Enter", "运行模拟"],
+  ["空格 / Ctrl+Enter", "运行模拟"],
+  ["Enter", "进入当前分束器的反射臂（选中分束器时；按钮上触发按钮，输入框内确认参数）"],
   ["q / e", "上一个 / 下一个输出平面（焦点不在输入框内时）"],
   ["1 / 2 / 3 / 4 / 5", "视图：总强度 / |Ex|² / |Ey|² / 相位 Ex / 相位 Ey"],
   ["p", "显示/隐藏一维剖面"],
@@ -941,7 +946,11 @@ document.addEventListener("keydown", (e) => {
   }
   switch (e.key) {
     case " ": e.preventDefault(); run(); break;
-    case "Enter": if (e.ctrlKey) run(); break;
+    case "Enter":
+      if (e.ctrlKey) { run(); break; }
+      // 焦点不在按钮上时，Enter 进入当前分束器的反射臂（按钮上仍走原生触发，避免双重进入）
+      if (tag !== "BUTTON") enterReflectedArm();
+      break;
     case "1": setView("total"); break;
     case "2": setView("ex"); break;
     case "3": setView("ey"); break;
