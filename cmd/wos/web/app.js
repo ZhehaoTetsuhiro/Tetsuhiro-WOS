@@ -1,9 +1,10 @@
 "use strict";
-/* Tetsuhiro WOS 波动光学模拟器 — 纯键盘操作前端（鼠标已禁用）。
+/* Tetsuhiro WOS 波动光学模拟器 — 鼠标与键盘双可用前端。
  * 全部控件为原生表单元素（Tab/方向键/Enter 原生可用），另提供全局快捷键。
  * 焦点位于表单控件内时键盘完全交还原生行为（数字框可输入科学计数法 e/E、
  * ↑/↓ 按步长步进），全局快捷键（f 定位、q/e 平面、n 新建、o 打开、s 保存等）
  * 在焦点离开控件后生效。Enter 在数字/文本框内确认并移出焦点。
+ * 顶部可在「波动光学」与「量子光学」模式间切换（m 键或点击按钮）。
  */
 
 // ---------------- state ----------------
@@ -19,11 +20,15 @@ const S = {
   scale: "log",
   elIdx: 0,
   ctx: [],           // [{bsIndex, label}] 臂上下文栈
-  autoRun: true,
+  autoRun: false,     // 默认关闭：修改参数后不自动重算，需手动「▶ 运行」
   profileAxis: null, // null | 'x' | 'y'
   cache: new Map(),
   timer: null,
   insertSel: 0,
+  mode: "wave",      // "wave" | "quantum"
+  qconfig: null,     // quantum optics config
+  qresult: null,
+  qtimer: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -313,7 +318,7 @@ function renderGlobals() {
     if (g.grid.size === n) o.selected = true;
     ssel.appendChild(o);
   });
-  ssel.addEventListener("change", () => { g.grid.size = Number(ssel.value); run(); });
+  ssel.addEventListener("change", () => { g.grid.size = Number(ssel.value); scheduleRun(); });
   row1.appendChild(ssel);
   panel.appendChild(row1);
 
@@ -326,7 +331,7 @@ function renderGlobals() {
     Object.assign(num, opts || {});
     num.value = get();
     num.title = "直接输入数值（支持科学计数法，如 632.8）；↑/↓ 步进；Enter 确认";
-    bindNumInput(num, get, set, () => scheduleRun(), () => run());
+    bindNumInput(num, get, set, () => scheduleRun(), () => scheduleRun());
     row.appendChild(num);
     return row;
   };
@@ -339,7 +344,7 @@ function renderGlobals() {
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = g.polarized;
-  cb.addEventListener("change", () => { g.polarized = cb.checked; run(); });
+  cb.addEventListener("change", () => { g.polarized = cb.checked; scheduleRun(); });
   brow.appendChild(cb);
   panel.appendChild(brow);
 
@@ -353,7 +358,7 @@ function renderGlobals() {
     if (g.method === m.key) o.selected = true;
     msel.appendChild(o);
   });
-  msel.addEventListener("change", () => { g.method = msel.value; run(); });
+  msel.addEventListener("change", () => { g.method = msel.value; scheduleRun(); });
   mrow.appendChild(msel);
   panel.appendChild(mrow);
 
@@ -367,7 +372,7 @@ function renderGlobals() {
     if ((g.evanescent || "decay") === k) o.selected = true;
     esel.appendChild(o);
   });
-  esel.addEventListener("change", () => { g.evanescent = esel.value; run(); });
+  esel.addEventListener("change", () => { g.evanescent = esel.value; scheduleRun(); });
   erow.appendChild(esel);
   panel.appendChild(erow);
 
@@ -377,7 +382,7 @@ function renderGlobals() {
   const bcb = document.createElement("input");
   bcb.type = "checkbox";
   bcb.checked = !!g.bandlimit;
-  bcb.addEventListener("change", () => { g.bandlimit = bcb.checked ? { fraction: 0.9, sigma: 0.05 } : null; run(); });
+  bcb.addEventListener("change", () => { g.bandlimit = bcb.checked ? { fraction: 0.9, sigma: 0.05 } : null; scheduleRun(); });
   brow2.appendChild(bcb);
   panel.appendChild(brow2);
 }
@@ -398,7 +403,7 @@ function renderSource() {
   });
   sel.addEventListener("change", () => {
     src.type = sel.value; src.params = {};
-    renderSource(); run();
+    renderSource(); scheduleRun();
     // 面板重绘会销毁旧控件，把焦点交还给新的类型下拉，便于连续键盘调整
     const again = panel.querySelector("select");
     if (again) again.focus();
@@ -426,7 +431,7 @@ function renderSource() {
     psel.addEventListener("change", () => {
       params.polarization = psel.value;
       if (psel.value === "custom") { params.jx_re = 1; params.jx_im = 0; params.jy_re = 0; params.jy_im = 0; }
-      renderSource(); run();
+      renderSource(); scheduleRun();
       const again = $("#polSel");
       if (again) again.focus();
     });
@@ -577,9 +582,9 @@ function drawProfile() {
       if (vmax - vmin < 1e-30) return;
       const isPhase = S.view === "phase_x" || S.view === "phase_y";
       const pad = 30, w = pc.width - 2 * pad, h = pc.height - 2 * pad;
-      ctx.strokeStyle = "rgba(255,255,255,.25)";
+      ctx.strokeStyle = "rgba(20,40,60,.25)";
       ctx.beginPath(); ctx.moveTo(pad, pc.height - pad); ctx.lineTo(pc.width - pad, pc.height - pad); ctx.stroke();
-      ctx.strokeStyle = isPhase ? "#ffb454" : "#4da3ff";
+      ctx.strokeStyle = isPhase ? "#c96f00" : "#1460c8";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       for (let i = 0; i < x.length; i++) {
@@ -589,7 +594,7 @@ function drawProfile() {
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
       ctx.stroke();
-      ctx.fillStyle = "#9fb3cc";
+      ctx.fillStyle = "#33475c";
       ctx.font = "11px sans-serif";
       ctx.fillText((isPhase ? "相位 rad  范围 " : "强度 W/m²  范围 ") + fmtNum(vmin) + " ~ " + fmtNum(vmax) + "   切割位置 " + fmtNum(prof.coord) + "m", pad, 14);
     }).catch(() => {});
@@ -756,20 +761,21 @@ const HELP_ROWS = [
   ["Shift+↑ / Shift+↓", "移动元件在光路中的顺序"],
   ["i", "在当前元件后插入新元件（输入文字过滤，Enter 插入）"],
   ["d / Delete", "删除当前元件"],
-  ["空格 / Ctrl+Enter", "运行模拟"],
+  ["▶ 运行 / 空格 / Ctrl+Enter", "运行模拟（修改参数后不自动运行）"],
   ["Enter", "进入当前分束器的反射臂（选中分束器时；按钮上触发按钮，输入框内确认参数）"],
   ["q / e", "上一个 / 下一个输出平面（焦点不在输入框内时）"],
   ["1 / 2 / 3 / 4 / 5", "视图：总强度 / |Ex|² / |Ey|² / 相位 Ex / 相位 Ey"],
   ["p", "显示/隐藏一维剖面"],
   ["x / y", "剖面方向：横向 / 纵向"],
   ["l", "强度视图 对数/线性 标度切换"],
-  ["a", "自动运行开关（参数修改后自动重算）"],
+  ["a", "自动运行开关（默认关闭）"],
   ["j", "高级：直接编辑配置 JSON"],
   ["n", "新建空白光路"],
   ["o", "打开 JSON 配置文件（内置示例在 examples/presets/ 目录）"],
   ["s", "把当前配置保存为 JSON 文件"],
   ["Esc", "关闭对话框 / 返回上一层光路"],
-  ["? / F1", "打开本帮助"],
+  ["m", "波动光学 / 量子光学 模式切换"],
+  ["? / F1", "打开本帮助（鼠标可直接点击任意按钮操作）"],
 ];
 function openHelp() {
   $("#helpOverlay").hidden = false;
@@ -939,13 +945,19 @@ document.addEventListener("keydown", (e) => {
     // 光路。全局快捷键统一在焦点离开控件后生效。
     // 例外：f 定位在所有输入控件内都生效且不输入字符（文本框内的 f 字符请用 j
     // JSON 编辑器输入），因此连按 f 可在同一元件/光源的多个参数间切换。
-    if (e.key === "f") { e.preventDefault(); jumpFocus(); return; }
+    if (e.key === "f" && S.mode === "wave") { e.preventDefault(); jumpFocus(); return; }
     // Enter：数字/文本框确认并移出焦点（change 事件随之提交，之后可直接用全局键）。
     if (e.key === "Enter" && tag === "INPUT" && (t.type === "number" || t.type === "text")) t.blur();
     return;
   }
+  if (S.mode === "quantum") {
+    if (e.key === " ") { e.preventDefault(); qRun(); }
+    else if (e.key === "m") { setMode("wave"); }
+    return;
+  }
   switch (e.key) {
     case " ": e.preventDefault(); run(); break;
+    case "m": setMode("quantum"); break;
     case "Enter":
       if (e.ctrlKey) { run(); break; }
       // 焦点不在按钮上时，Enter 进入当前分束器的反射臂（按钮上仍走原生触发，避免双重进入）
@@ -981,6 +993,408 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// ---------------- quantum optics mode ----------------
+function blankQuantumConfig() {
+  return {
+    modes: 2,
+    cutoff: 4,
+    state: { type: "fock", params: { occupation: "1,1" } },
+    gates: [{ type: "beam_splitter", params: { mode0: 0, mode1: 1, reflectivity: 0.5 } }],
+  };
+}
+
+function qDoc(type) { return S.catalog.quantum.states.find((d) => d.type === type); }
+function qGateDoc(type) { return S.catalog.quantum.gates.find((d) => d.type === type); }
+
+function setMode(m) {
+  S.mode = m;
+  $("#waveModeBtn").classList.toggle("active", m === "wave");
+  $("#quantumModeBtn").classList.toggle("active", m === "quantum");
+  $("#waveEditor").hidden = m !== "wave";
+  $("#quantumEditor").hidden = m !== "quantum";
+  $("#waveOutput").hidden = m !== "wave";
+  $("#quantumOutput").hidden = m !== "quantum";
+  $("#waveGlobals").hidden = m !== "wave";
+  if (m === "quantum") { renderQuantum(); qRun(); }
+  else { renderAll(); }
+}
+
+// A generic parameter row for the quantum editor.
+function qRow(doc, get, set, onCommit) {
+  const row = document.createElement("div");
+  row.className = "prow";
+  const lab = document.createElement("label");
+  lab.textContent = doc.label + (doc.unit ? " [" + doc.unit + "]" : "");
+  lab.title = doc.help || "";
+  row.appendChild(lab);
+  const val = get();
+  if (doc.kind === "choice") {
+    const sel = document.createElement("select");
+    (doc.choices || []).forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c;
+      if (String(val) === String(c)) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", () => { set(sel.value); onCommit(); });
+    row.appendChild(sel);
+  } else if (doc.kind === "bool") {
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!val;
+    cb.addEventListener("change", () => { set(cb.checked); onCommit(); });
+    row.appendChild(cb);
+  } else if (doc.kind === "text") {
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = val === undefined || val === null ? "" : String(val);
+    inp.addEventListener("change", () => { set(inp.value); onCommit(); });
+    row.appendChild(inp);
+  } else { // float / int
+    const num = document.createElement("input");
+    num.type = "number";
+    num.min = doc.min !== undefined ? doc.min : 0;
+    num.max = doc.max !== undefined ? doc.max : 1;
+    num.step = doc.step || 0.01;
+    num.value = Number(val) || 0;
+    bindNumInput(num, () => get(), (x) => { set(x); }, () => onCommit(), () => onCommit());
+    row.appendChild(num);
+  }
+  return row;
+}
+
+function renderQConfigPanel() {
+  const panel = $("#qConfigPanel");
+  panel.innerHTML = "";
+  const q = S.qconfig;
+  const mkInt = (label, get, set, min, max) => {
+    const row = document.createElement("div");
+    row.className = "prow";
+    row.appendChild(Object.assign(document.createElement("label"), { textContent: label }));
+    const num = document.createElement("input");
+    num.type = "number"; num.min = min; num.max = max; num.step = 1; num.value = get();
+    bindNumInput(num, get, set, () => {}, () => {});
+    row.appendChild(num);
+    return row;
+  };
+  panel.appendChild(mkInt("模式数 modes", () => q.modes, (v) => { q.modes = Math.max(1, Math.round(v)); }, 1, 4));
+  panel.appendChild(mkInt("截断 cutoff", () => q.cutoff, (v) => { q.cutoff = Math.max(1, Math.round(v)); }, 1, 20));
+
+  const st = q.state;
+  const srow = document.createElement("div");
+  srow.className = "prow";
+  srow.appendChild(Object.assign(document.createElement("label"), { textContent: "初态" }));
+  const ssel = document.createElement("select");
+  S.catalog.quantum.states.forEach((d) => {
+    const o = document.createElement("option");
+    o.value = d.type; o.textContent = d.label;
+    if (st.type === d.type) o.selected = true;
+    ssel.appendChild(o);
+  });
+  ssel.addEventListener("change", () => {
+    st.type = ssel.value;
+    st.params = {};
+    const doc = qDoc(st.type);
+    if (doc) doc.params.forEach((pd) => { if (pd.default !== undefined) st.params[pd.key] = clone(pd.default); });
+    renderQuantum();
+  });
+  srow.appendChild(ssel);
+  panel.appendChild(srow);
+
+  const doc = qDoc(st.type);
+  if (!doc) return;
+  const params = st.params || (st.params = {});
+  doc.params.forEach((pd) => {
+    panel.appendChild(qRow(pd, () => params[pd.key], (v) => { params[pd.key] = v; }, () => {}));
+  });
+}
+
+function renderQGates() {
+  const box = $("#qGatesPanel");
+  box.innerHTML = "";
+  (S.qconfig.gates || []).forEach((g, i) => {
+    const row = document.createElement("div");
+    row.className = "gateRow";
+    const head = document.createElement("div");
+    head.className = "ghead";
+    const sel = document.createElement("select");
+    S.catalog.quantum.gates.forEach((d) => {
+      const o = document.createElement("option");
+      o.value = d.type; o.textContent = d.label;
+      if (g.type === d.type) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", () => {
+      g.type = sel.value;
+      g.params = {};
+      const doc = qGateDoc(g.type);
+      if (doc) doc.params.forEach((pd) => { if (pd.default !== undefined) g.params[pd.key] = clone(pd.default); });
+      renderQuantum();
+    });
+    head.appendChild(sel);
+    const del = document.createElement("button");
+    del.textContent = "删除";
+    del.addEventListener("click", () => { S.qconfig.gates.splice(i, 1); renderQuantum(); qRun(); });
+    head.appendChild(del);
+    row.appendChild(head);
+    const doc = qGateDoc(g.type);
+    if (doc) {
+      const params = g.params || (g.params = {});
+      doc.params.forEach((pd) => {
+        row.appendChild(qRow(pd, () => params[pd.key], (v) => { params[pd.key] = v; }, () => {}));
+      });
+    }
+    box.appendChild(row);
+  });
+}
+
+function renderQuantum() {
+  renderQConfigPanel();
+  renderQGates();
+}
+
+function scheduleQuantum() {
+  clearTimeout(S.qtimer);
+  S.qtimer = setTimeout(qRun, 350);
+}
+
+// Build the JSON payload for the /api/quantum endpoint (occupation converted
+// from a comma string to an int array).
+function buildQuantumPayload() {
+  const cfg = {
+    modes: S.qconfig.modes,
+    cutoff: S.qconfig.cutoff,
+    state: S.qconfig.state,
+    gates: S.qconfig.gates || [],
+  };
+  if (cfg.state.type === "fock" && typeof cfg.state.params.occupation === "string") {
+    const occ = cfg.state.params.occupation.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n));
+    cfg.state = { type: cfg.state.type, params: Object.assign({}, cfg.state.params, { occupation: occ }) };
+  }
+  return cfg;
+}
+
+async function qRun() {
+  if (!S.qconfig) return;
+  try {
+    const r = await fetch("/api/quantum", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildQuantumPayload()),
+    });
+    const j = await r.json();
+    if (!r.ok) { setStatus("量子模拟错误: " + (j.error || r.status), true); return; }
+    S.qresult = j;
+    renderQResults(j);
+    setStatus("量子模拟完成（" + j.modes + " 模式，cutoff " + j.cutoff + "）");
+  } catch (e) {
+    setStatus("量子请求失败: " + e.message, true);
+  }
+}
+
+async function qExportPng() {
+  if (!S.qconfig) return;
+  try {
+    const r = await fetch("/api/quantum?fmt=png", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildQuantumPayload()),
+    });
+    if (!r.ok) { setStatus("量子 PNG 导出失败: " + r.status, true); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "quantum-chart.png";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus("已导出 quantum-chart.png");
+  } catch (e) {
+    setStatus("量子 PNG 导出失败: " + e.message, true);
+  }
+}
+
+async function qExportSvg() {
+  if (!S.qconfig) return;
+  try {
+    const r = await fetch("/api/quantum?fmt=svg", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildQuantumPayload()),
+    });
+    if (!r.ok) { setStatus("量子 SVG 导出失败: " + r.status, true); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "quantum-chart.svg";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus("已导出 quantum-chart.svg");
+  } catch (e) {
+    setStatus("量子 SVG 导出失败: " + e.message, true);
+  }
+}
+
+function svgEscape(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Render one 1-D profile plot (axes + grid + polyline + labels) into `out`,
+// vertically offset by `oy`.
+function plotProfileBlock(out, prof, field, axis, oy) {
+  const W = 820, H = 350;
+  const ml = 78, mr = 22, mt = 44, mb = 48;
+  const pw = W - ml - mr, ph = H - mt - mb;
+  const x = prof.x, v = prof.v;
+  const fieldLabel = { total: "总强度", ex: "|Ex|²", ey: "|Ey|²", phase_x: "相位 Ex", phase_y: "相位 Ey" }[field] || field;
+  const unit = (field === "phase_x" || field === "phase_y") ? "rad" : "W/m²";
+  const ty = (yy) => (yy + oy).toFixed(1);
+  if (!x || !x.length || x.length < 2) {
+    out.push('<text x="' + (W / 2) + '" y="' + ty(H / 2) + '" text-anchor="middle" font-size="13" fill="#33475c">无剖面数据（' + axis.toUpperCase() + '）</text>');
+    return;
+  }
+  let vmin = Infinity, vmax = -Infinity;
+  for (const y of v) { if (y < vmin) vmin = y; if (y > vmax) vmax = y; }
+  if (!(vmax - vmin > 1e-30)) vmax = vmin + 1;
+  const xmin = x[0], xmax = x[x.length - 1];
+  const X = (xi) => ml + (xi - xmin) / (xmax - xmin) * pw;
+  const Y = (vi) => mt + (1 - (vi - vmin) / (vmax - vmin)) * ph;
+
+  let pts = "";
+  for (let i = 0; i < x.length; i++) {
+    pts += (i ? " " : "") + X(x[i]).toFixed(2) + "," + (Y(v[i]) + oy).toFixed(2);
+  }
+  // grid
+  for (let i = 0; i <= 4; i++) {
+    out.push('<line x1="' + ml + '" y1="' + ty(mt + ph * i / 4) + '" x2="' + (W - mr) + '" y2="' + ty(mt + ph * i / 4) + '" stroke="#e3e9ee"/>');
+    out.push('<line x1="' + (ml + pw * i / 4).toFixed(1) + '" y1="' + ty(mt) + '" x2="' + (ml + pw * i / 4).toFixed(1) + '" y2="' + ty(H - mb) + '" stroke="#e3e9ee"/>');
+  }
+  // plot frame
+  out.push('<rect x="' + ml + '" y="' + ty(mt) + '" width="' + pw + '" height="' + ph + '" fill="none" stroke="#33475c"/>');
+  // curve
+  out.push('<polyline points="' + pts + '" fill="none" stroke="#1460c8" stroke-width="1.8"/>');
+  // y-axis labels (top = max, bottom = min)
+  out.push('<text x="' + (ml - 8) + '" y="' + ty(mt + 4) + '" text-anchor="end" font-size="11" fill="#33475c">' + fmtNum(vmax) + '</text>');
+  out.push('<text x="' + (ml - 8) + '" y="' + ty(H - mb + 4) + '" text-anchor="end" font-size="11" fill="#33475c">' + fmtNum(vmin) + '</text>');
+  // x-axis labels
+  out.push('<text x="' + ml + '" y="' + ty(H - mb + 18) + '" text-anchor="middle" font-size="11" fill="#33475c">' + fmtNum(xmin) + '</text>');
+  out.push('<text x="' + (W - mr) + '" y="' + ty(H - mb + 18) + '" text-anchor="middle" font-size="11" fill="#33475c">' + fmtNum(xmax) + '</text>');
+  // title
+  out.push('<text x="' + (W / 2) + '" y="' + ty(16) + '" text-anchor="middle" font-size="14" font-weight="bold" fill="#14324a">' + svgEscape(fieldLabel) + ' 剖面（' + axis.toUpperCase() + '）</text>');
+  out.push('<text x="' + (W / 2) + '" y="' + ty(H - 6) + '" text-anchor="middle" font-size="11" fill="#5a7d9e">位置 (m) · 固定坐标 ' + fmtNum(prof.coord) + ' m · ' + unit + ' 范围 ' + fmtNum(vmin) + ' ~ ' + fmtNum(vmax) + '</text>');
+}
+
+// Build a pure-vector SVG containing BOTH the X and Y profiles (stacked).
+function buildProfileSVG(profX, profY, field) {
+  const W = 820, plotH = 350, gap = 8;
+  const H = plotH * 2 + gap;
+  const out = [];
+  out.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="sans-serif">');
+  out.push('<rect width="100%" height="100%" fill="#ffffff"/>');
+  plotProfileBlock(out, profX, field, "x", 0);
+  plotProfileBlock(out, profY, field, "y", plotH + gap);
+  out.push('</svg>');
+  return out.join("");
+}
+
+// Export the current wave-optics X and Y profiles as a pure-vector SVG.
+async function exportWaveSvg() {
+  if (!S.meta || !S.meta.planes.length) { setStatus("无输出平面可导出", true); return; }
+  const p = S.meta.planes[S.planeIdx];
+  const field = S.view;
+  try {
+    const [profX, profY] = await Promise.all([
+      fetch("/api/runs/" + S.runId + "/profiles/" + p.id + "?axis=x&field=" + field).then((r) => r.json()),
+      fetch("/api/runs/" + S.runId + "/profiles/" + p.id + "?axis=y&field=" + field).then((r) => r.json()),
+    ]);
+    const svg = buildProfileSVG(profX, profY, field);
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "wos-profile.svg";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setStatus("已导出 wos-profile.svg（" + field + " · X/Y 两个剖面）");
+  } catch (e) {
+    setStatus("导出 SVG 失败: " + e.message, true);
+  }
+}
+
+function renderQResults(res) {
+  const box = $("#qResults");
+  box.innerHTML = "";
+  // per-mode photon statistics
+  const statGrid = document.createElement("div");
+  statGrid.className = "qgrid";
+  for (let m = 0; m < res.modes; m++) {
+    const card = document.createElement("div");
+    card.className = "qcard";
+    const h = document.createElement("h3");
+    h.textContent = "模式 " + m + "：⟨n⟩=" + fmtNum(res.mean_photons[m]) + "  g²(0)=" + fmtNum(res.g2[m]);
+    card.appendChild(h);
+    const dist = res.photon_distributions[m];
+    let mx = 0;
+    for (const p of dist) if (p > mx) mx = p;
+    for (let n = 0; n < dist.length; n++) {
+      const r = document.createElement("div");
+      r.className = "qbarRow";
+      const lab = document.createElement("span");
+      lab.className = "n"; lab.textContent = n;
+      r.appendChild(lab);
+      const bar = document.createElement("span");
+      bar.className = "qbar";
+      bar.style.width = (mx > 0 ? Math.max(1, (dist[n] / mx) * 100) : 0) + "%";
+      r.appendChild(bar);
+      const p = document.createElement("span");
+      p.className = "p"; p.textContent = fmtNum(dist[n]);
+      r.appendChild(p);
+      card.appendChild(r);
+    }
+    const q = res.quadratures[m];
+    const qline = document.createElement("div");
+    qline.className = "hint";
+    qline.textContent = "x：⟨x⟩=" + fmtNum(q.mean_x) + " Var=" + fmtNum(q.var_x) + "  p：⟨p⟩=" + fmtNum(q.mean_p) + " Var=" + fmtNum(q.var_p);
+    card.appendChild(qline);
+    statGrid.appendChild(card);
+  }
+  box.appendChild(statGrid);
+
+  // joint distributions
+  for (const key of Object.keys(res.joint_distributions || {})) {
+    const [m0, m1] = key.split(",").map(Number);
+    const base = res.cutoff + 1;
+    const flat = res.joint_distributions[key];
+    const nShow = Math.min(base, 6);
+    const card = document.createElement("div");
+    card.className = "qcard";
+    const h = document.createElement("h3");
+    h.textContent = "联合分布 P(n" + m0 + ", n" + m1 + ")";
+    card.appendChild(h);
+    const table = document.createElement("table");
+    table.className = "qtable";
+    let html = "<tr><th>n" + m0 + "\\n" + m1 + "</th>";
+    for (let b = 0; b < nShow; b++) html += "<th>" + b + "</th>";
+    html += "</tr>";
+    for (let a = 0; a < nShow; a++) {
+      html += "<tr><th>" + a + "</th>";
+      for (let b = 0; b < nShow; b++) {
+        html += "<td>" + fmtNum(flat[a * base + b]) + "</td>";
+      }
+      html += "</tr>";
+    }
+    table.innerHTML = html;
+    card.appendChild(table);
+    box.appendChild(card);
+  }
+}
+
 // ---------------- init ----------------
 async function init() {
   try {
@@ -1011,6 +1425,16 @@ async function init() {
   $("#newBtn").addEventListener("click", newFile);
   $("#saveBtn").addEventListener("click", saveFile);
   $("#openBtn").addEventListener("click", openFilePicker);
+  $("#waveModeBtn").addEventListener("click", () => setMode("wave"));
+  $("#quantumModeBtn").addEventListener("click", () => setMode("quantum"));
+  $("#qAddGate").addEventListener("click", () => {
+    S.qconfig.gates.push({ type: "beam_splitter", params: { mode0: 0, mode1: 1, reflectivity: 0.5 } });
+    renderQuantum(); qRun();
+  });
+  $("#runBtn").addEventListener("click", () => { if (S.mode === "quantum") qRun(); else run(); });
+  $("#qExportPng").addEventListener("click", qExportPng);
+  $("#qExportSvg").addEventListener("click", qExportSvg);
+  $("#exportSvgBtn").addEventListener("click", exportWaveSvg);
   $("#fileOpen").addEventListener("change", (ev) => {
     const f = ev.target.files && ev.target.files[0];
     if (f) openFile(f);
@@ -1026,6 +1450,7 @@ async function init() {
     cfg = exs[defIdx] ? clone(exs[defIdx].config) : null;
   }
   S.config = cfg || blankConfig();
+  S.qconfig = blankQuantumConfig();
   renderAll();
   run();
 }

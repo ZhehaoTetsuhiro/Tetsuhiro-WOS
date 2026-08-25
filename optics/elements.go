@@ -126,6 +126,8 @@ func init() {
 	RegisterElement("zone_plate", newZonePlate)
 	RegisterElement("diffuser", newDiffuser)
 	RegisterElement("mirror", newMirror)
+	RegisterElement("concave_mirror", newConcaveMirror)
+	RegisterElement("convex_mirror", newConvexMirror)
 	RegisterElement("zernike", newZernike)
 	RegisterElement("polarizer", newPolarizer)
 	RegisterElement("retarder", newRetarder)
@@ -655,6 +657,77 @@ func (e *mirrorEl) Apply(f *Field, ctx *Context) error {
 			f.Ex[idx] *= t
 			if f.Polarized {
 				f.Ey[idx] *= t
+			}
+		}
+	}
+	return nil
+}
+
+// ---- spherical mirrors (concave / convex, adjustable radius of curvature) --
+
+type sphericalMirrorEl struct {
+	radius       float64 // radius of curvature R (m), > 0
+	convex       bool    // true = convex (diverging); false = concave (converging)
+	reflectivity float64
+	aperture     float64
+	x0, y0       float64
+}
+
+func newConcaveMirror(p map[string]any) (Element, error) {
+	return newSphericalMirror(p, false)
+}
+
+func newConvexMirror(p map[string]any) (Element, error) {
+	return newSphericalMirror(p, true)
+}
+
+func newSphericalMirror(p map[string]any, convex bool) (Element, error) {
+	e := &sphericalMirrorEl{
+		radius:       pfd(p, "radius", 0.5),
+		convex:       convex,
+		reflectivity: pfd(p, "reflectivity", 1),
+		aperture:     pfd(p, "aperture", 0),
+		x0:           pfd(p, "x", 0),
+		y0:           pfd(p, "y", 0),
+	}
+	if e.radius <= 0 {
+		return nil, fmt.Errorf("mirror: radius must be > 0")
+	}
+	if e.reflectivity < 0 || e.reflectivity > 1 {
+		return nil, fmt.Errorf("mirror: reflectivity must be in [0,1]")
+	}
+	return e, nil
+}
+
+// Apply implements the spherical-mirror phase. A concave mirror (R > 0) is a
+// converging reflector with focal length f = R/2 (phase -k r²/R); a convex
+// mirror is diverging (phase +k r²/R). reflectivity is the amplitude
+// reflectance and aperture is an optional circular pupil.
+func (e *sphericalMirrorEl) Apply(f *Field, ctx *Context) error {
+	k := 2 * math.Pi / ctx.Wavelength
+	c := -k / e.radius
+	if e.convex {
+		c = k / e.radius
+	}
+	rr := complex(e.reflectivity, 0)
+	ap := e.aperture
+	n := f.N
+	for j := 0; j < n; j++ {
+		dy := f.Y(j) - e.y0
+		for i := 0; i < n; i++ {
+			dx := f.X(i) - e.x0
+			r2 := dx*dx + dy*dy
+			if ap > 0 && r2 > ap*ap {
+				f.Ex[j*n+i] = 0
+				if f.Polarized {
+					f.Ey[j*n+i] = 0
+				}
+				continue
+			}
+			t := rr * cexpI(c*r2)
+			f.Ex[j*n+i] *= t
+			if f.Polarized {
+				f.Ey[j*n+i] *= t
 			}
 		}
 	}

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"io"
 	"math"
 	"net/url"
 	"os"
+	"strings"
 
 	"twos/optics"
 )
@@ -191,6 +193,199 @@ func pngEncode(w io.Writer, img image.Image) error {
 		return err
 	}
 	return bw.Flush()
+}
+
+func infernoAt(t float64) color.RGBA {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return infernoLUT[int(t*255)]
+}
+
+// renderQuantumChart rasterizes a quantum result: the per-mode photon-number
+// distributions (bar charts, one band per mode) stacked above the first joint
+// distribution heatmap (log scale). No text labels (stdlib has no font); the
+// layout is documented in docs/QUANTUM.md.
+func renderQuantumChart(res *optics.QuantumResult) *image.RGBA {
+	base := res.Cutoff + 1
+	const barW = 8
+	const bandH = 72
+	const cell = 10
+	const pad = 6
+	distW := base * barW
+	jointSize := 0
+	if res.Modes >= 2 {
+		jointSize = base * cell
+	}
+	width := distW
+	if jointSize > width {
+		width = jointSize
+	}
+	if width < 64 {
+		width = 64
+	}
+	height := res.Modes*bandH + jointSize + pad
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{10, 13, 18, 255}), image.Point{}, draw.Src)
+
+	// Photon-number distribution bar charts (linear, self-normalized per mode).
+	innerH := bandH - 4
+	for m := 0; m < res.Modes; m++ {
+		dist := res.Dist[m]
+		mx := 0.0
+		for _, p := range dist {
+			if p > mx {
+				mx = p
+			}
+		}
+		y0 := m * bandH
+		for n := 0; n < base; n++ {
+			t := 0.0
+			if mx > 0 {
+				t = dist[n] / mx
+			}
+			bh := int(t * float64(innerH))
+			if bh < 0 {
+				bh = 0
+			}
+			x0 := n * barW
+			c := infernoAt(t)
+			for y := 0; y < bh; y++ {
+				for x := 0; x < barW-1; x++ {
+					img.Set(x0+x, y0+innerH-y, c)
+				}
+			}
+		}
+	}
+
+	// Joint distribution heatmap (log scale) for the first mode pair.
+	if res.Modes >= 2 {
+		flat := res.Joint["0,1"]
+		mx := 0.0
+		for _, v := range flat {
+			if v > mx {
+				mx = v
+			}
+		}
+		yOff := res.Modes*bandH + pad
+		const dyn = 1e4
+		for b := 0; b < base; b++ {
+			for a := 0; a < base; a++ {
+				v := flat[a*base+b]
+				t := 0.0
+				if mx > 0 {
+					vp := v / mx
+					t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+				}
+				for y := 0; y < cell; y++ {
+					for x := 0; x < cell; x++ {
+						img.Set(a*cell+x, yOff+b*cell+y, infernoAt(t))
+					}
+				}
+			}
+		}
+	}
+	return img
+}
+
+// RenderQuantumPNG writes a quantum result chart to a PNG file.
+func RenderQuantumPNG(path string, res *optics.QuantumResult) error {
+	img := renderQuantumChart(res)
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return pngEncode(f, img)
+}
+
+func svgHex(c color.RGBA) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+}
+
+// renderQuantumSVG renders a quantum result chart as an SVG string (vector
+// bars for the photon distributions + a heatmap grid for the joint
+// distribution). Layout mirrors renderQuantumChart.
+func renderQuantumSVG(res *optics.QuantumResult) string {
+	base := res.Cutoff + 1
+	const barW = 8
+	const bandH = 72
+	const cell = 10
+	const pad = 6
+	distW := base * barW
+	jointSize := 0
+	if res.Modes >= 2 {
+		jointSize = base * cell
+	}
+	width := distW
+	if jointSize > width {
+		width = jointSize
+	}
+	if width < 64 {
+		width = 64
+	}
+	height := res.Modes*bandH + jointSize + pad
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`, width, height, width, height)
+	sb.WriteString(`<rect width="100%" height="100%" fill="#0a0d12"/>`)
+
+	innerH := bandH - 4
+	for m := 0; m < res.Modes; m++ {
+		dist := res.Dist[m]
+		mx := 0.0
+		for _, p := range dist {
+			if p > mx {
+				mx = p
+			}
+		}
+		y0 := m * bandH
+		for n := 0; n < base; n++ {
+			t := 0.0
+			if mx > 0 {
+				t = dist[n] / mx
+			}
+			bh := int(t * float64(innerH))
+			if bh <= 0 {
+				continue
+			}
+			x := n * barW
+			y := y0 + innerH - bh
+			fmt.Fprintf(&sb, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, x, y, barW-1, bh, svgHex(infernoAt(t)))
+		}
+	}
+
+	if res.Modes >= 2 {
+		flat := res.Joint["0,1"]
+		mx := 0.0
+		for _, v := range flat {
+			if v > mx {
+				mx = v
+			}
+		}
+		yOff := res.Modes*bandH + pad
+		const dyn = 1e4
+		for b := 0; b < base; b++ {
+			for a := 0; a < base; a++ {
+				v := flat[a*base+b]
+				t := 0.0
+				if mx > 0 {
+					vp := v / mx
+					t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+				}
+				fmt.Fprintf(&sb, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, a*cell, yOff+b*cell, cell, cell, svgHex(infernoAt(t)))
+			}
+		}
+	}
+	sb.WriteString("</svg>")
+	return sb.String()
+}
+
+// RenderQuantumSVG writes a quantum result chart to an SVG file.
+func RenderQuantumSVG(path string, res *optics.QuantumResult) error {
+	return os.WriteFile(path, []byte(renderQuantumSVG(res)), 0o644)
 }
 
 // RenderPlanePNG writes one field view of a plane to a PNG file. field is

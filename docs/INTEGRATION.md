@@ -137,6 +137,16 @@ json.Unmarshal 到 optics.Config 即完成解析；ValidateConfig 给出逐项�
 
 （GUI 本身即按此协议实现，见 cmd/wos/web/app.js。）
 
+### 2.5 量子光学（/api/quantum）
+
+Fock 基线性光学同步接口（微秒级，直接返回结果）：
+
+    curl -s -X POST -H 'Content-Type: application/json' \
+         --data '{"modes":2,"cutoff":4,"state":{"type":"fock","params":{"occupation":[1,1]}},"gates":[{"type":"beam_splitter","params":{"mode0":0,"mode1":1,"reflectivity":0.5}}]}' \
+         http://localhost:8080/api/quantum
+
+返回光子数分布、g²(0)、正交分量与联合分布（Hong-Ou-Mandel 等），协议见 docs/QUANTUM.md §6 与 docs/API.md。
+
 ## 3. 精度与性能调参清单
 
 | 目标 | 操作 |

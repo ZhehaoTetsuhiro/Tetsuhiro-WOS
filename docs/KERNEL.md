@@ -7,17 +7,20 @@
     optics/fft.go          并行 radix-2 FFT（plan 缓存 + sync.Pool 列缓冲）
     optics/field.go        场类型 Field、Context、Warnings、带限滤波
     optics/source.go       光源构造（含 LG/HG 多项式递推）
-    optics/propagate.go    传播算法 ASM / FresnelTF / FresnelIR / Fraunhofer / Auto
+    optics/propagate.go    传播算法 ASM / ASMPad / ASMShift / Fresnel / Fraunhofer / Auto
     optics/elements.go     元件库与注册表（薄元件 + 琼斯元件）
     optics/simulator.go    光路引擎：线性序列、反射臂、合束器、输出平面
     optics/metrics.go      指标（功率/峰值/质心/RMS/Strehl）与一维剖面
     optics/validate.go     配置校验（含分束臂静态遍历）
-    optics/catalog.go      元件/光源/方法/示例目录（GUI 由它驱动）
-    server/server.go       HTTP API（异步提交、轮询、LRU 运行缓存）
+    optics/catalog.go      元件/光源/方法/示例/量子目录（GUI 由它驱动）
+    optics/quantum.go      量子光学内核：QState、门、测量、SimulateQuantum
+    optics/quantum_density.go 密度矩阵后端：混合态（热态）、损耗信道、酉共轭门
+    optics/quantum_matrix.go 稠密小矩阵助手 + 分块矩阵指数（分束器精确构造）
+    server/server.go       HTTP API（异步提交、轮询、LRU 运行缓存、/api/quantum）
     server/render.go       PNG 渲染与色图
     cmd/wos/main.go        可执行文件（go:embed 内嵌 web GUI）
 
-依赖为零（仅标准库）：FFT 自研、多项式递推自研、PNG 用标准库 image/png。
+依赖为零（仅标准库）：FFT 自研、多项式递推自研、量子矩阵指数自研、PNG 用标准库 image/png。
 
 ## 2. 核心类型
 
@@ -41,7 +44,8 @@
     optics.Propagate(f, 0.1, optics.MethodASM, ctx)  // 传播 0.1 m
 
 - Propagate 支持负 z（逆传播）；衰逝波在负 z 时自动置零并告警 backward_evanescent。
-- ApplyBandlimit 可对任意场做奈奎斯特带限（参数含义见 PHYSICS.md §3）。
+- 高精度变体：MethodASMPad（2N 零填充线性卷积）与 MethodASMShift（离轴载频搬移），见 PHYSICS.md §3.1。
+- ApplyBandlimit 可对任意场做奈奎斯特带限（参数含义见 PHYSICS.md §3）。Propagate 本身不再自动带限——由模拟器 trainer 在每平面后施加一次，避免对 propagate 元件重复滤波；低层直接调用 Propagate 时如需带限请显式调用 ApplyBandlimit。
 - Field.ApplyTilt 用精确方向余弦（非傍轴）；Field.ApplyJones 处理标量→矢量升维。
 - 功率归一化：Field.NormalizePower(p)；功率读取 Field.Power()（W）。
 
@@ -142,3 +146,26 @@
 - 硬边 + 混叠噪声会污染一阶暗环——用带限或首个低于 2% 峰值的暗环定位法。
 - 往返/干涉的相位是 k·(总路程)（含 Gouy 按总距离计算），不是各段相位相加。
 - 倾角/相位梯度不得超出 π/像素（奈奎斯特）。
+- 离轴频移法（asm_shift）的关键是搬移载频后必须用**平移后的传递函数 H(f+fc)**，否则传播结果与普通 ASM 无异（shift 只是纯相位，必须连同传递函数一起搬）。
+
+## 10. 量子光学内核
+
+量子内核与波动内核解耦，纯态态矢量 + 混合态密度矩阵（Fock 基）：
+
+    type QState struct { Modes int; Cutoff int; Amps []complex128 }          // 纯态
+    type DensityMatrix struct { Modes int; Cutoff int; Rho []complex128 }    // 混合态
+    FockState / CoherentState / SqueezedVacuumState / TwoModeSqueezedVacuum / ThermalState
+    PhaseShift / BeamSplitter / Displace / Squeeze / Loss
+    MeanPhotonNumber / PhotonNumberDistribution / G2 / JointProb /
+    QuadratureStats / Fidelity / Norm / Normalize
+    SimulateQuantum(cfg QuantumConfig) (*QuantumResult, error)                // JSON 入口
+
+实现要点：
+- 下标 little-endian 混合进制：`idx = n0 + base·n1 + base²·n2 + …`。
+- 单模门：构建 (cutoff+1)² 的局部幺正矩阵，按「旁观模式」分块散射到态矢量；双模门同理（(cutoff+1)² 的局部矩阵）。
+- 分束器矩阵按总光子数分块、逐块对易哈密顿 exp(iθ(a0†a1+a0a1†)) 求矩阵指数（见 quantum_matrix.go 的 beamSplitterMatrix），精确且与经典对称分束器约定一致。
+- 位移/压缩门对反厄米生成元 expm（缩放平方法 + 泰勒级数）。
+- 混合态（热态/损耗）由密度矩阵后端处理：门做酉共轭 ρ→UρU†（分块局部酉），损耗信道做 Kraus 分解 Σ E_l ρ E_l†。SimulateQuantum 自动选择后端（状态含 thermal 或门含 loss 时走密度矩阵）。
+- 限制：MaxQuantumModes=4、MaxQuantumCutoff=20（SimulateQuantum 校验）。密度矩阵内存为 Dim²，模式多、截断大时成本更高。
+
+物理测试（quantum_test.go）：HOM 聚束、相干态泊松统计、Fock g²、压缩真空正交分量（Heisenberg 极限 1/16）、双模压缩光子数关联、热态统计、损耗信道（迹守恒/二项分布）、单光子马赫-曾德尔。全部解析对比。

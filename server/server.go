@@ -106,6 +106,42 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "issues": out})
 	})
+	mux.HandleFunc("/api/quantum", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "POST only")
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "读取请求体失败: "+err.Error())
+			return
+		}
+		var cfg optics.QuantumConfig
+		if err := json.Unmarshal(body, &cfg); err != nil {
+			writeErr(w, http.StatusBadRequest, "JSON 解析失败: "+err.Error())
+			return
+		}
+		res, err := optics.SimulateQuantum(cfg)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		switch r.URL.Query().Get("fmt") {
+		case "png":
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(http.StatusOK)
+			_ = pngEncode(w, renderQuantumChart(res))
+			return
+		case "svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(renderQuantumSVG(res)))
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("/api/simulate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, http.StatusMethodNotAllowed, "POST only")

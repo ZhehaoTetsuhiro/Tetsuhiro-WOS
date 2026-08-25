@@ -102,7 +102,7 @@ var ElementDocs = []ElementDoc{
 	{Type: "propagate", Label: "自由传播", Help: "沿光束传播方向前进 distance 米；可单独指定传播算法。",
 		Params: []ParamSpec{
 			fp("distance", "距离", "m", 0, 100, 1e-3, 0.1, "沿光束方向的路程（反射后仍取正值，相位继续累加）"),
-			cp("method", "传播算法", []string{"auto", "asm", "fresnel_tf", "fresnel_ir", "fraunhofer"}, "auto", "留空/auto 使用全局算法"),
+			cp("method", "传播算法", []string{"auto", "asm", "asm_pad", "asm_shift", "fresnel_tf", "fresnel_ir", "fraunhofer"}, "auto", "留空/auto 使用全局算法"),
 		}},
 	{Type: "lens", Label: "薄透镜", Help: "相位 exp(-i k r^2/(2f))；f>0 会聚，f<0 发散，可带圆形孔径。",
 		Params: []ParamSpec{
@@ -183,6 +183,22 @@ var ElementDocs = []ElementDoc{
 			fp("tilt_x", "倾斜 x", "rad", -0.5, 0.5, 1e-3, 0, "光束偏转 2*tilt_x"),
 			fp("tilt_y", "倾斜 y", "rad", -0.5, 0.5, 1e-3, 0, ""),
 		}},
+	{Type: "concave_mirror", Label: "凹面镜", Help: "会聚球面反射镜：等效焦距 f = R/2（半径 R>0）。",
+		Params: []ParamSpec{
+			fp("radius", "曲率半径 R", "m", 1e-3, 100, 1e-3, 0.5, "会聚，焦距 R/2"),
+			fp("reflectivity", "振幅反射率", "", 0, 1, 0.01, 1, ""),
+			fp("aperture", "孔径半径", "m", 0, 0.05, 1e-4, 0, "0 表示无孔径"),
+			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
+			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
+		}},
+	{Type: "convex_mirror", Label: "凸面镜", Help: "发散球面反射镜：等效焦距 f = -R/2（半径 R>0）。",
+		Params: []ParamSpec{
+			fp("radius", "曲率半径 R", "m", 1e-3, 100, 1e-3, 0.5, "发散，焦距 -R/2"),
+			fp("reflectivity", "振幅反射率", "", 0, 1, 0.01, 1, ""),
+			fp("aperture", "孔径半径", "m", 0, 0.05, 1e-4, 0, "0 表示无孔径"),
+			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
+			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
+		}},
 	{Type: "zernike", Label: "泽尼克像差板", Help: "Noll 序 1-21 项泽尼克波前像差（单位：波长），用于研究像差。",
 		Params: zernikeParams()},
 	{Type: "polarizer", Label: "线偏振片", Help: "琼斯投影矩阵，透振方向 angle。",
@@ -256,6 +272,8 @@ var MethodDocs = []struct {
 }{
 	{"auto", "自动（=角谱法）", "始终选择精确的角谱法"},
 	{"asm", "角谱法（精确）", "亥姆霍兹方程在均匀介质中的精确解；无傍轴近似，默认推荐"},
+	{"asm_pad", "角谱法（零填充 2×，高精度）", "2N×2N 零填充做线性卷积，消除光束超出窗口时的环绕混叠；内存/耗时约 4×"},
+	{"asm_shift", "角谱法（离轴频移）", "搬移倾斜光束的载频后再传播，抑制频谱贴边混叠；适合大倾角照明"},
 	{"fresnel_tf", "菲涅尔（传递函数）", "傍轴近似；|z| <= N*dx^2/lambda 时有效"},
 	{"fresnel_ir", "菲涅尔（冲激响应）", "傍轴近似；|z| >= N*dx^2/lambda 时有效"},
 	{"fraunhofer", "夫琅禾费（远场）", "输出像素变为 lambda*|z|/(N*dx)；要求菲涅耳数 D^2/(lambda*z) << 1"},
@@ -443,16 +461,90 @@ func Examples() []Example {
 
 // Catalog is the full documentation payload served to the GUI.
 type Catalog struct {
-	Sources       []ElementDoc `json:"sources"`
-	Elements      []ElementDoc `json:"elements"`
-	Methods       []any        `json:"methods"`
-	Polarizations []any        `json:"polarizations"`
-	Examples      []Example    `json:"examples"`
+	Sources       []ElementDoc   `json:"sources"`
+	Elements      []ElementDoc   `json:"elements"`
+	Methods       []any          `json:"methods"`
+	Polarizations []any          `json:"polarizations"`
+	Quantum       QuantumCatalog `json:"quantum"`
+	Examples      []Example      `json:"examples"`
+}
+
+// QuantumCatalog documents the quantum-optics states and gates.
+type QuantumCatalog struct {
+	States []ElementDoc `json:"states"`
+	Gates  []ElementDoc `json:"gates"`
+}
+
+// QuantumStateDocs documents the built-in quantum initial states.
+var QuantumStateDocs = []ElementDoc{
+	{Type: "vacuum", Label: "真空态", Help: "全模式 |0…0⟩ 真空态。",
+		Params: []ParamSpec{}},
+	{Type: "fock", Label: "Fock 光子数态", Help: "多模光子数态 |n0,n1,…⟩；occupation 用逗号分隔（如 1,1）。",
+		Params: []ParamSpec{
+			tp("occupation", "光子数（逗号分隔）", "1,1", "每模光子数，如 1,1 表示 |1,1⟩"),
+		}},
+	{Type: "coherent", Label: "相干态", Help: "单模相干态 |α⟩（其余模式为真空）。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, "施加到哪个模式"),
+			fp("alpha_re", "α 实部", "", -10, 10, 0.1, 1, ""),
+			fp("alpha_im", "α 虚部", "", -10, 10, 0.1, 0, ""),
+		}},
+	{Type: "squeezed_vacuum", Label: "压缩真空态", Help: "单模压缩真空 S(z)|0⟩，z = r·e^{iθ}。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, ""),
+			fp("r", "压缩参数 r", "", 0, 3, 0.1, 0.5, "越大压缩越强"),
+			fp("phase", "压缩角 θ", "rad", 0, 6.2832, 0.1, 0, ""),
+		}},
+	{Type: "two_mode_squeezed", Label: "双模压缩真空（EPR）", Help: "模式 0、1 的纠缠双模压缩真空态。",
+		Params: []ParamSpec{
+			fp("r", "压缩参数 r", "", 0, 3, 0.1, 0.5, ""),
+		}},
+	{Type: "thermal", Label: "热态", Help: "每模热态（几何光子数分布），mean_n 用逗号分隔（如 1,0.5）。混合态，走密度矩阵后端。",
+		Params: []ParamSpec{
+			tp("mean_n", "平均光子数（逗号分隔）", "1", "每模平均光子数，如 1 或 1,0.5"),
+		}},
+}
+
+// QuantumGateDocs documents the built-in linear-optical gates.
+var QuantumGateDocs = []ElementDoc{
+	{Type: "phase_shift", Label: "相移", Help: "exp(i·φ·n) 作用到单模。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, ""),
+			fp("phase", "相位 φ", "rad", 0, 6.2832, 0.1, 0, ""),
+		}},
+	{Type: "beam_splitter", Label: "分束器", Help: "对称分束器 U=exp(iθ(a0†a1+a0a1†))，θ=asin(√R)。",
+		Params: []ParamSpec{
+			ip("mode0", "模式 0", "", 0, MaxQuantumModes-1, 0, ""),
+			ip("mode1", "模式 1", "", 0, MaxQuantumModes-1, 1, ""),
+			fp("reflectivity", "反射率 R", "", 0, 1, 0.05, 0.5, ""),
+		}},
+	{Type: "displacement", Label: "位移", Help: "位移算符 D(α)=exp(αa†−α*a)。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, ""),
+			fp("alpha_re", "α 实部", "", -10, 10, 0.1, 1, ""),
+			fp("alpha_im", "α 虚部", "", -10, 10, 0.1, 0, ""),
+		}},
+	{Type: "squeeze", Label: "压缩", Help: "单模压缩 S(z)=exp(½(z*a²−za†²))。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, ""),
+			fp("r", "压缩参数 r", "", 0, 3, 0.1, 0.5, ""),
+			fp("phase", "压缩角 θ", "rad", 0, 6.2832, 0.1, 0, ""),
+		}},
+	{Type: "loss", Label: "损耗信道", Help: "透射率 T 的损耗信道（振幅阻尼 Kraus 算符），产生混合态。",
+		Params: []ParamSpec{
+			ip("mode", "模式", "", 0, MaxQuantumModes-1, 0, ""),
+			fp("transmittance", "透射率 T", "", 0, 1, 0.05, 0.5, "存活概率；Fock |n⟩ 经损耗变为二项分布"),
+		}},
+}
+
+// BuildQuantumCatalog assembles the quantum catalog document.
+func BuildQuantumCatalog() QuantumCatalog {
+	return QuantumCatalog{States: QuantumStateDocs, Gates: QuantumGateDocs}
 }
 
 // BuildCatalog assembles the catalog document.
 func BuildCatalog() Catalog {
-	cat := Catalog{Sources: SourceDocs, Elements: ElementDocs, Examples: Examples()}
+	cat := Catalog{Sources: SourceDocs, Elements: ElementDocs, Quantum: BuildQuantumCatalog(), Examples: Examples()}
 	for _, m := range MethodDocs {
 		cat.Methods = append(cat.Methods, map[string]string{"key": m.Key, "label": m.Label, "help": m.Help})
 	}

@@ -4,6 +4,12 @@
 /wos
 /wos.exe
 
+# Windows 发行目录（wos.exe + 预设 + 说明，构建产物）
+/win/
+
+# 发布产物（二进制与 zip，构建产物）
+/.release/
+
 # Go 构建缓存
 .gocache/
 

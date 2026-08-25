@@ -9,6 +9,7 @@
 | GET | /api/catalog | 元件/光源/算法/偏振/示例目录（GUI 由它驱动；含中文标签、单位、范围、默认值） |
 | GET | /api/health | 存活检查 |
 | POST | /api/validate | 校验配置，返回 {"ok":bool,"issues":[{path,message}]} |
+| POST | /api/quantum | 量子光学模拟，同步返回 QuantumResult（微秒级，无需轮询） |
 | POST | /api/simulate | 提交配置，202 返回 {"run_id","status":"running"}；后台计算（串行队列） |
 | GET | /api/runs/{id} | 状态 + 结果元数据；status = running / done / error |
 | GET | /api/runs/{id}/planes/{pid} | 平面场数据：fmt=bin（float32）或 fmt=png |
@@ -21,6 +22,32 @@
 请求体 = Config JSON（结构见 docs/INTEGRATION.md §1.1；完整字段与示例见 /api/catalog 的 examples 与 optics.Config 注释）。校验失败返回 400 并给出第一个错误（全部错误用 /api/validate 获取）。
 
 限制：网格 64–2048（2 的幂）、元件 ≤256、输出平面 ≤64、分束臂嵌套 ≤8、请求体 ≤2 MB。
+
+## POST /api/quantum
+
+请求体 = QuantumConfig（Fock 基线性光学；详见 docs/QUANTUM.md §6）：
+
+    {
+      "modes": 2, "cutoff": 4,
+      "state": {"type": "fock", "params": {"occupation": [1,1]}},
+      "gates": [{"type": "beam_splitter", "params": {"mode0":0, "mode1":1, "reflectivity":0.5}}]
+    }
+
+同步返回 QuantumResult：
+
+    {
+      "modes": 2, "cutoff": 4, "norm": 1.0,
+      "mean_photons": [0.5, 0.5], "g2": [0, 0],
+      "photon_distributions": [[0.5, 0.5, ...], [...]],
+      "quadratures": [{"mode":0,"mean_x":0,"var_x":0.25,"mean_p":0,"var_p":0.25}, ...],
+      "joint_distributions": {"0,1": [ ... ]}   // 拍平 (cutoff+1)^2，下标 a*(cutoff+1)+b
+    }
+
+state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / thermal；gate.type：phase_shift / beam_splitter / displacement / squeeze / loss（参数见 /api/catalog 的 quantum 段）。热态（thermal）与损耗门（loss）产生混合态，自动走密度矩阵后端。
+
+`POST /api/quantum?fmt=png` 返回同一结果的 PNG 图表（每模光子数分布柱状图 + 第一对模式联合分布热图）；`fmt=svg` 返回等价的矢量 SVG 图表。
+
+限制：模式数 ≤4、截断 ≤20（越界返回 400）。
 
 ## GET /api/runs/{id}
 

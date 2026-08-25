@@ -11,6 +11,17 @@ import (
 //	            equation in a homogeneous medium for the sampled field.
 //	            Default; no paraxial approximation, no z-range restriction
 //	            (only the Nyquist bandlimit of the discrete grid applies).
+//	asm_pad     Zero-padded (2x) angular spectrum method. The field is padded
+//	            to a 2N x 2N grid so the FFT convolution is linear over a
+//	            doubled real-space window; this removes wrap-around aliasing
+//	            for beams that walk off or expand beyond the N x N window.
+//	            Costs ~4x memory/time. The output is cropped back to N x N.
+//	asm_shift   Off-axis (frequency-shifted) angular spectrum method. The
+//	            spectral centroid (carrier frequency) of a tilted beam is
+//	            removed before propagation and restored afterwards, centering
+//	            the spectrum so energy near the band edge does not alias.
+//	            Best for strongly tilted illumination; exact for tilt within
+//	            the Nyquist limit.
 //	fresnel_tf  Fresnel diffraction, transfer-function form (paraxial).
 //	            Valid when |z| <= N*dx^2/lambda; aliases beyond that.
 //	fresnel_ir  Fresnel diffraction, impulse-response form (paraxial).
@@ -24,6 +35,8 @@ type Method string
 const (
 	MethodAuto       Method = "auto"
 	MethodASM        Method = "asm"
+	MethodASMPad     Method = "asm_pad"
+	MethodASMShift   Method = "asm_shift"
 	MethodFresnelTF  Method = "fresnel_tf"
 	MethodFresnelIR  Method = "fresnel_ir"
 	MethodFraunhofer Method = "fraunhofer"
@@ -32,7 +45,7 @@ const (
 // ParseMethod maps a method name to a Method; unknown names error.
 func ParseMethod(s string) (Method, error) {
 	switch Method(s) {
-	case MethodAuto, MethodASM, MethodFresnelTF, MethodFresnelIR, MethodFraunhofer:
+	case MethodAuto, MethodASM, MethodASMPad, MethodASMShift, MethodFresnelTF, MethodFresnelIR, MethodFraunhofer:
 		return Method(s), nil
 	case "":
 		return MethodAuto, nil
@@ -55,6 +68,10 @@ func Propagate(f *Field, z float64, method Method, ctx *Context) error {
 	switch method {
 	case MethodASM:
 		propASM(f, z, ctx)
+	case MethodASMPad:
+		propASMPad(f, z, ctx)
+	case MethodASMShift:
+		propASMShift(f, z, ctx)
 	case MethodFresnelTF:
 		propFresnelTF(f, z, ctx)
 	case MethodFresnelIR:
@@ -64,9 +81,10 @@ func Propagate(f *Field, z float64, method Method, ctx *Context) error {
 	default:
 		return fmt.Errorf("unknown propagation method %q", method)
 	}
-	if ctx.Bandlimit != nil {
-		f.ApplyBandlimit(ctx.Bandlimit)
-	}
+	// Note: the bandlimit (Nyquist regularization) is applied by the simulator
+	// trainer after each element, not here, so a propagate element is never
+	// filtered twice. Low-level Propagate callers may call ApplyBandlimit
+	// explicitly when they want it.
 	return nil
 }
 
@@ -116,15 +134,12 @@ func (ctx *Context) transfer(f *Field, z float64, h func(fx, fy float64) complex
 	}
 }
 
-// propASM: U(z) = F^-1{ F{U} * exp(i k z sqrt(1-(lambda fx)^2-(lambda fy)^2)) }.
-// Evanescent components (lambda*f > 1) decay as exp(-k|z| sqrt((lambda f)^2-1))
-// forward, and are zeroed on backward propagation (they would amplify).
-func propASM(f *Field, z float64, ctx *Context) {
-	wl := ctx.Wavelength
+// asmTF returns the ASM transfer function H(fx,fy) = exp(i k z sqrt(1-(lambda
+// f)^2)) for propagating components, and exp(-k|z| sqrt((lambda f)^2-1)) for
+// evanescent components (or 0 when zeroEv is set).
+func asmTF(wl, z float64, zeroEv bool) func(fx, fy float64) complex128 {
 	k := 2 * math.Pi / wl
-	pIn := f.Power()
-	zeroEv := z < 0 || ctx.Evanescent == "zero"
-	h := func(fx, fy float64) complex128 {
+	return func(fx, fy float64) complex128 {
 		rho2 := (wl*fx)*(wl*fx) + (wl*fy)*(wl*fy)
 		if rho2 <= 1 {
 			return cexpI(k * z * math.Sqrt(1-rho2))
@@ -134,8 +149,11 @@ func propASM(f *Field, z float64, ctx *Context) {
 		}
 		return complex(math.Exp(-k*z*math.Sqrt(rho2-1)), 0)
 	}
-	ctx.transfer(f, z, h)
-	pOut := f.Power()
+}
+
+// asmWarn records the standard ASM diagnostics (evanescent loss / backward
+// evanescent zeroing) after a propagation step.
+func asmWarn(f *Field, z float64, ctx *Context, pIn, pOut float64, zeroEv bool) {
 	if pIn > 0 && pOut < pIn*(1-1e-8) && z > 0 {
 		ctx.Warnings.Add("evanescent_filtered",
 			fmt.Sprintf("角谱传播中滤除了衰逝波分量（功率损失 %.2e%%）", (pIn-pOut)/pIn*100),
@@ -145,6 +163,147 @@ func propASM(f *Field, z float64, ctx *Context) {
 		ctx.Warnings.Add("backward_evanescent",
 			"反向传播（反射后）时衰逝波被置零（物理上为不稳定的放大分量）", 0)
 	}
+}
+
+// propASM: U(z) = F^-1{ F{U} * exp(i k z sqrt(1-(lambda fx)^2-(lambda fy)^2)) }.
+// Evanescent components (lambda*f > 1) decay as exp(-k|z| sqrt((lambda f)^2-1))
+// forward, and are zeroed on backward propagation (they would amplify).
+func propASM(f *Field, z float64, ctx *Context) {
+	zeroEv := z < 0 || ctx.Evanescent == "zero"
+	pIn := f.Power()
+	ctx.transfer(f, z, asmTF(ctx.Wavelength, z, zeroEv))
+	pOut := f.Power()
+	asmWarn(f, z, ctx, pIn, pOut, zeroEv)
+}
+
+// propASMPad is the zero-padded (linear-convolution) angular spectrum method.
+// The field is placed in the central N x N block of a 2N x 2N buffer (same
+// pixel size dx), propagated, and cropped back. Doubling the real-space window
+// removes wrap-around aliasing for fields that spread beyond the original
+// N x N window during propagation (tilted/diverging beams, long distances).
+func propASMPad(f *Field, z float64, ctx *Context) {
+	n := f.N
+	m := 2 * n
+	dx := f.DX
+	zeroEv := z < 0 || ctx.Evanescent == "zero"
+	h := asmTF(ctx.Wavelength, z, zeroEv)
+	freqM := func(i int) float64 {
+		if i <= m/2 {
+			return float64(i) / (float64(m) * dx)
+		}
+		return float64(i-m) / (float64(m) * dx)
+	}
+	pIn := f.Power()
+	buf := make([]complex128, m*m)
+	off := n / 2
+	apply := func(a []complex128) {
+		for i := range buf {
+			buf[i] = 0
+		}
+		for j := 0; j < n; j++ {
+			copy(buf[(j+off)*m+off:(j+off)*m+off+n], a[j*n:(j+1)*n])
+		}
+		fft2D(buf, m, false)
+		for j := 0; j < m; j++ {
+			fy := freqM(j)
+			for i := 0; i < m; i++ {
+				buf[j*m+i] *= h(freqM(i), fy)
+			}
+		}
+		fft2D(buf, m, true)
+		for j := 0; j < n; j++ {
+			copy(a[j*n:(j+1)*n], buf[(j+off)*m+off:(j+off)*m+off+n])
+		}
+	}
+	apply(f.Ex)
+	if f.Polarized {
+		apply(f.Ey)
+	}
+	pOut := f.Power()
+	asmWarn(f, z, ctx, pIn, pOut, zeroEv)
+}
+
+// spectralCentroid returns the power-spectrum centroid (carrier spatial
+// frequency, 1/m) of the field, weighting both Jones components when present.
+func spectralCentroid(f *Field) (fx, fy float64) {
+	n := f.N
+	var sx, sy, sw float64
+	comp := func(c []complex128) {
+		a := append([]complex128(nil), c...)
+		fft2D(a, n, false)
+		for j := 0; j < n; j++ {
+			fy := f.freq(j)
+			for i := 0; i < n; i++ {
+				fx := f.freq(i)
+				w := real(a[j*n+i])*real(a[j*n+i]) + imag(a[j*n+i])*imag(a[j*n+i])
+				sw += w
+				sx += w * fx
+				sy += w * fy
+			}
+		}
+	}
+	comp(f.Ex)
+	if f.Polarized {
+		comp(f.Ey)
+	}
+	if sw <= 0 {
+		return 0, 0
+	}
+	return sx / sw, sy / sw
+}
+
+// propASMShift is the off-axis (frequency-shifted) angular spectrum method.
+// A tilted beam concentrates its spectrum away from DC; energy near the band
+// edge wraps around and aliases. We remove the carrier (the spectral centroid)
+// with a linear phase ramp, then propagate with the transfer function
+// evaluated at the shifted frequency H(f+fc), and finally restore the carrier.
+// This keeps the spectrum centered where H varies slowly, and is exact for a
+// carrier within the Nyquist limit. The shift is a pure unitary phase, so
+// power is unaffected.
+func propASMShift(f *Field, z float64, ctx *Context) {
+	fxC, fyC := spectralCentroid(f)
+	fbin := 1 / (float64(f.N) * f.DX)
+	if math.Abs(fxC) < 0.5*fbin && math.Abs(fyC) < 0.5*fbin {
+		propASM(f, z, ctx)
+		return
+	}
+	wl := ctx.Wavelength
+	zeroEv := z < 0 || ctx.Evanescent == "zero"
+	h := asmTF(wl, z, zeroEv)
+	n := f.N
+	shift := func(a []complex128, sgn float64) {
+		for j := 0; j < n; j++ {
+			y := f.Y(j)
+			for i := 0; i < n; i++ {
+				a[j*n+i] *= cexpI(sgn * 2 * math.Pi * (fxC*f.X(i) + fyC*y))
+			}
+		}
+	}
+	pIn := f.Power()
+	shift(f.Ex, -1)
+	if f.Polarized {
+		shift(f.Ey, -1)
+	}
+	apply := func(a []complex128) {
+		fft2D(a, n, false)
+		for j := 0; j < n; j++ {
+			fy := f.freq(j) + fyC
+			for i := 0; i < n; i++ {
+				a[j*n+i] *= h(f.freq(i)+fxC, fy)
+			}
+		}
+		fft2D(a, n, true)
+	}
+	apply(f.Ex)
+	if f.Polarized {
+		apply(f.Ey)
+	}
+	shift(f.Ex, +1)
+	if f.Polarized {
+		shift(f.Ey, +1)
+	}
+	pOut := f.Power()
+	asmWarn(f, z, ctx, pIn, pOut, zeroEv)
 }
 
 // propFresnelTF: paraxial transfer function H = exp(i k z) exp(-i pi lambda z f^2).

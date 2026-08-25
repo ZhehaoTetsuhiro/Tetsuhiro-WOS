@@ -8,12 +8,17 @@
 </head>
 <body>
 <header>
-  <h1>Tetsuhiro WOS 波动光学模拟器</h1>
+  <h1>Tetsuhiro WOS</h1>
   <div class="status" id="status" role="status" aria-live="polite">加载中…</div>
   <button id="newBtn" title="新建空白光路 (n)">新建 (n)</button>
   <button id="openBtn" title="打开 JSON 配置文件 (o)">打开 (o)</button>
   <button id="saveBtn" title="把当前配置保存为 JSON 文件 (s)">保存 (s)</button>
   <input type="file" id="fileOpen" accept=".json,application/json" hidden aria-hidden="true">
+  <span class="modeSwitch" role="group" aria-label="模拟模式">
+    <button id="waveModeBtn" class="active" title="波动光学模式">波动光学</button>
+    <button id="quantumModeBtn" title="量子光学模式">量子光学</button>
+  </span>
+  <button id="runBtn" title="运行模拟 (空格)">▶ 运行</button>
   <button id="helpBtn" title="快捷键帮助 (?)">? 帮助</button>
 </header>
 
@@ -21,58 +26,73 @@
   <aside id="left">
     <section>
       <h2>光路编辑器</h2>
-      <div id="breadcrumb" aria-label="当前光路"></div>
-      <div id="elList" role="list" aria-label="元件列表"></div>
-      <div class="row">
-        <button id="insertBtn">插入元件 (i)</button>
-        <button id="deleteBtn">删除 (d)</button>
+      <!-- 波动光学编辑器 -->
+      <div id="waveEditor">
+        <div id="breadcrumb" aria-label="当前光路"></div>
+        <div id="elList" role="list" aria-label="元件列表"></div>
+        <div class="row">
+          <button id="insertBtn">插入元件 (i)</button>
+          <button id="deleteBtn">删除 (d)</button>
+        </div>
+        <div id="paramPanel" aria-label="元件参数">
+          <p class="hint">用 ↑/↓ 选择元件，f 逐个定位参数，数字框直接输入（支持 1e-3 科学计数法）、↑/↓ 步进，Enter 确认。</p>
+        </div>
       </div>
-      <div id="paramPanel" aria-label="元件参数">
-        <p class="hint">用 ↑/↓ 选择元件，f 逐个定位参数（当前元件参数 → 光源 → 全局 → 元件列表循环），数字框直接输入（支持 1e-3 科学计数法）、↑/↓ 步进，Enter 确认。</p>
+      <!-- 量子光学编辑器 -->
+      <div id="quantumEditor" hidden>
+        <div id="qConfigPanel"></div>
+        <h2 style="margin-top:12px">门序列</h2>
+        <div id="qGatesPanel"></div>
+        <div class="row">
+          <button id="qAddGate">+ 增加门</button>
+          <button id="qExportPng">导出 PNG</button>
+          <button id="qExportSvg">导出 SVG</button>
+        </div>
+        <p class="hint">Fock 基线性光学：Fock/相干/压缩/热态光子数分布、g²(0)、正交分量与联合分布。</p>
       </div>
     </section>
-  </aside>
-
-  <section id="center">
-    <div id="viewTabs" role="tablist" aria-label="显示视图">
-      <button role="tab" data-view="total">1 总强度</button>
-      <button role="tab" data-view="ex">2 |Ex|²</button>
-      <button role="tab" data-view="ey">3 |Ey|²</button>
-      <button role="tab" data-view="phase_x">4 相位 Ex</button>
-      <button role="tab" data-view="phase_y">5 相位 Ey</button>
-      <button id="profBtn">p 剖面</button>
-      <button id="scaleBtn">l 对数</button>
-    </div>
-    <div id="canvasWrap">
-      <canvas id="view" width="512" height="512"></canvas>
-      <canvas id="prof" width="512" height="512"></canvas>
-      <div id="planeNav">
-        <button id="prevPlane">◀ q</button>
-        <span id="planeLabel">—</span>
-        <button id="nextPlane">e ▶</button>
-      </div>
-    </div>
-    <div id="stats" aria-label="当前平面指标"></div>
-  </section>
-
-  <aside id="right">
-    <section>
+    <!-- 波动光学：全局参数 / 光源 / 警告（量子模式隐藏） -->
+    <section id="waveGlobals">
       <h2>全局参数</h2>
       <div id="globalPanel"></div>
-    </section>
-    <section>
-      <h2>光源</h2>
+      <h2 style="margin-top:10px">光源</h2>
       <div id="sourcePanel"></div>
-    </section>
-    <section>
-      <h2>警告与信息</h2>
+      <h2 style="margin-top:10px">警告与信息</h2>
       <div id="warnings"></div>
     </section>
   </aside>
+
+  <section id="center" aria-label="输出">
+    <div id="waveOutput">
+      <div id="viewTabs" role="tablist" aria-label="显示视图">
+        <button role="tab" data-view="total">1 总强度</button>
+        <button role="tab" data-view="ex">2 |Ex|²</button>
+        <button role="tab" data-view="ey">3 |Ey|²</button>
+        <button role="tab" data-view="phase_x">4 相位 Ex</button>
+        <button role="tab" data-view="phase_y">5 相位 Ey</button>
+        <button id="profBtn">p 剖面</button>
+        <button id="scaleBtn">l 对数</button>
+        <button id="exportSvgBtn" title="导出 X/Y 两个剖面曲线为矢量 SVG">导出 SVG</button>
+      </div>
+      <div id="canvasWrap">
+        <canvas id="view" width="512" height="512"></canvas>
+        <canvas id="prof" width="512" height="512"></canvas>
+        <div id="planeNav">
+          <button id="prevPlane">◀ q</button>
+          <span id="planeLabel">—</span>
+          <button id="nextPlane">e ▶</button>
+        </div>
+      </div>
+      <div id="stats" aria-label="当前平面指标"></div>
+    </div>
+    <div id="quantumOutput" hidden>
+      <div id="qResults"></div>
+    </div>
+  </section>
 </main>
 
 <footer>
-  <span>Tab 移动焦点 · f 逐个定位参数 · 输入框内原生输入（数字框支持 1e-3 科学计数法）· ↑↓ 选择元件 · Shift+↑↓ 排序 · i 插入 · d 删除 · 空格 运行 · q/e 切换平面 · 1-5 视图 · p 剖面 · l 对数/线性 · a 自动运行 · j JSON 模式 · n 新建 · o 打开（示例在 examples/presets/）· s 保存 · Enter 进入反射臂 · Esc 返回/关闭 · ? 帮助</span>
+  <span>Tab 移动焦点 · f 逐个定位参数 · ↑↓ 选择元件 · Shift+↑↓ 排序 · i 插入 · d 删除 · ▶ 运行/空格 · q/e 切换平面 · 1-5 视图 · p 剖面 · l 对数/线性 · j JSON · n 新建 · o 打开 · s 保存 · Enter 进入反射臂 · Esc 返回/关闭 · m 模式切换 · ? 帮助（鼠标可直接点击操作）</span>
 </footer>
 
 <div id="helpOverlay" class="overlay" hidden>
