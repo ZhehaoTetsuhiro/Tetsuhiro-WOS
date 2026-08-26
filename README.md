@@ -15,19 +15,20 @@
 
 本项目分两个发布通道：
 
-| 通道 | Tag | 内容 |
-|---|---|---|
-| **Release** | `v0.3.0` | **仅源码**（GitHub 自动生成的 zip/tar.gz 源码归档），供自行构建或二次开发 |
-| **Package** | `v0.3.0-package` | **编译并压缩好的二进制包**，开箱即用，无需安装 Go |
+- **Release**（`v0.3.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0`，`docker/podman run` 直接运行。
 
-Package 内含：
+预编译二进制：
 
 | 文件 | 平台 |
 |---|---|
 | `wos-linux-amd64` / `wos-linux-amd64.zip` | Linux x86-64（zip 内含二进制 + presets + 说明） |
 | `wos-windows-amd64.exe` / `wos-windows-amd64.zip` | Windows x86-64（zip 内含 exe + presets + 说明） |
 
-下载地址：https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases
+容器镜像：
+
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0
+    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0
 
 ## 快速开始
 
