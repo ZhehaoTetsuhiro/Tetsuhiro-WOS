@@ -24,7 +24,7 @@ Package 内含：
 
 | 文件 | 平台 |
 |---|---|
-| `wos-linux-amd64` / `wos-linux-amd64.zip` | Linux x86-64（zip 内含二进制 + 说明） |
+| `wos-linux-amd64` / `wos-linux-amd64.zip` | Linux x86-64（zip 内含二进制 + presets + 说明） |
 | `wos-windows-amd64.exe` / `wos-windows-amd64.zip` | Windows x86-64（zip 内含 exe + presets + 说明） |
 
 下载地址：https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases
