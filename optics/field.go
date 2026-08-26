@@ -7,14 +7,18 @@ import (
 )
 
 // Field is a sampled monochromatic field on an N x N grid with pixel size DX.
-// Ex and Ey are the Jones components (length N*N, row-major, index = y*N+x).
-// All quantities are SI: amplitudes carry sqrt(W)/m, |E|^2 is W/m^2.
+// Ex and Ey are the Jones components (length N*N, row-major, index = y*N+x);
+// Ez is the longitudinal component populated by vectorial (non-paraxial)
+// propagation when Vectorial is set. All quantities are SI: amplitudes carry
+// sqrt(W)/m, |E|^2 is W/m^2.
 type Field struct {
 	N         int
 	DX        float64 // pixel size, m
 	Polarized bool    // false: Ey is unused (scalar simulation)
+	Vectorial bool    // true: Ez is populated (3-component non-paraxial field)
 	Ex        []complex128
 	Ey        []complex128
+	Ez        []complex128
 }
 
 // NewField allocates a zero field.
@@ -26,12 +30,24 @@ func NewField(n int, dx float64, polarized bool) *Field {
 	}
 }
 
+// NewVectorialField allocates a zero 3-component field (Ex, Ey, Ez).
+func NewVectorialField(n int, dx float64) *Field {
+	f := NewField(n, dx, true)
+	f.Ez = make([]complex128, n*n)
+	f.Vectorial = true
+	return f
+}
+
 // Clone deep-copies the field.
 func (f *Field) Clone() *Field {
-	g := &Field{N: f.N, DX: f.DX, Polarized: f.Polarized,
+	g := &Field{N: f.N, DX: f.DX, Polarized: f.Polarized, Vectorial: f.Vectorial,
 		Ex: make([]complex128, len(f.Ex)), Ey: make([]complex128, len(f.Ey))}
 	copy(g.Ex, f.Ex)
 	copy(g.Ey, f.Ey)
+	if f.Vectorial && f.Ez != nil {
+		g.Ez = make([]complex128, len(f.Ez))
+		copy(g.Ez, f.Ez)
+	}
 	return g
 }
 
@@ -45,11 +61,14 @@ func (f *Field) X(i int) float64 { return (float64(i) - float64(f.N)/2) * f.DX }
 // Y returns the physical y coordinate of row j.
 func (f *Field) Y(j int) float64 { return (float64(j) - float64(f.N)/2) * f.DX }
 
-// Intensity returns |Ex|^2 + |Ey|^2 at linear index idx.
+// Intensity returns |Ex|^2 + |Ey|^2 (+ |Ez|^2 for vectorial fields) at idx.
 func (f *Field) Intensity(idx int) float64 {
 	p := real(f.Ex[idx])*real(f.Ex[idx]) + imag(f.Ex[idx])*imag(f.Ex[idx])
 	if f.Polarized {
 		p += real(f.Ey[idx])*real(f.Ey[idx]) + imag(f.Ey[idx])*imag(f.Ey[idx])
+	}
+	if f.Vectorial {
+		p += real(f.Ez[idx])*real(f.Ez[idx]) + imag(f.Ez[idx])*imag(f.Ez[idx])
 	}
 	return p
 }
@@ -76,6 +95,11 @@ func (f *Field) NormalizePower(p float64) error {
 	if f.Polarized {
 		for i := range f.Ey {
 			f.Ey[i] *= complex(s, 0)
+		}
+	}
+	if f.Vectorial {
+		for i := range f.Ez {
+			f.Ez[i] *= complex(s, 0)
 		}
 	}
 	return nil
@@ -116,6 +140,11 @@ func (f *Field) ScaleAmplitude(s complex128) {
 			f.Ey[i] *= s
 		}
 	}
+	if f.Vectorial {
+		for i := range f.Ez {
+			f.Ez[i] *= s
+		}
+	}
 }
 
 // ApplyTilt adds linear phase k(sin(tx) x + sin(ty) y) (exact, not paraxial).
@@ -129,6 +158,9 @@ func (f *Field) ApplyTilt(tx, ty, wl float64) {
 			f.Ex[idx] *= cexpI(ph)
 			if f.Polarized {
 				f.Ey[idx] *= cexpI(ph)
+			}
+			if f.Vectorial {
+				f.Ez[idx] *= cexpI(ph)
 			}
 			ph += k * sx * f.DX
 		}
@@ -145,9 +177,20 @@ func cexpI(phi float64) complex128 {
 type Context struct {
 	Wavelength float64 // m
 	Evanescent string  // "decay" (physical) or "zero" for evanescent waves
-	Bandlimit  *BandlimitOpts
-	RNG        *rand.Rand // deterministic per-element randomness (diffusers)
-	Warnings   *Warnings
+	// EvanescentLimit truncates evanescent components whose decay exponent
+	// (nepers) exceeds this value, guarding deep-evanescent underflow/overflow
+	// and acting as a bandlimit on the evanescent tail. 0 disables truncation.
+	EvanescentLimit float64
+	// BackwardRegularize switches backward (z<0) propagation from hard-zeroing
+	// the unstable, amplifying evanescent components to a Tikhonov-damped
+	// inverse A/(1+(alpha*A)^2), improving inverse/retrieval applications.
+	BackwardRegularize bool
+	// TikhonovAlpha is the regularization strength for BackwardRegularize.
+	// Values <= 0 fall back to 1e-3.
+	TikhonovAlpha float64
+	Bandlimit     *BandlimitOpts
+	RNG           *rand.Rand // deterministic per-element randomness (diffusers)
+	Warnings      *Warnings
 }
 
 // BandlimitOpts applies a smooth low-pass at a fraction of Nyquist to damp

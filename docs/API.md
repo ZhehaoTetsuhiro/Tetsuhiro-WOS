@@ -21,7 +21,7 @@
 
 请求体 = Config JSON（结构见 docs/INTEGRATION.md §1.1；完整字段与示例见 /api/catalog 的 examples 与 optics.Config 注释）。校验失败返回 400 并给出第一个错误（全部错误用 /api/validate 获取）。
 
-限制：网格 64–2048（2 的幂）、元件 ≤256、输出平面 ≤64、分束臂嵌套 ≤8、请求体 ≤2 MB。
+限制：网格 2–262144（偶数，支持非 2 的幂）、元件 ≤256、输出平面 ≤64、分束臂嵌套 ≤8、请求体 ≤2 MB。
 
 ## POST /api/quantum
 

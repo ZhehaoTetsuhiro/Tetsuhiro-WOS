@@ -128,7 +128,7 @@ func renderPlane(pl *optics.Plane, get func(int) float64, q url.Values) (*image.
 		}
 	}
 	field := q.Get("field")
-	isPhase := field == "phase_x" || field == "phase_y"
+	isPhase := field == "phase_x" || field == "phase_y" || field == "phase_z"
 	if vmax == vmin {
 		if isPhase {
 			vmin, vmax = -math.Pi, math.Pi

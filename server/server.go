@@ -158,6 +158,10 @@ func (s *Server) Handler() http.Handler {
 			writeErr(w, http.StatusBadRequest, fmt.Sprintf("配置校验失败：%s: %s", first.Path, first.Message))
 			return
 		}
+		if err := optics.CheckGridMemory(cfg.Grid.Size); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		id := s.submit(cfg)
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": id, "status": StatusRunning})
 	})
@@ -262,7 +266,7 @@ func (s *Server) submit(cfg *optics.Config) string {
 		e.status = StatusDone
 		e.res = res
 		for _, p := range res.Planes {
-			s.bytes += int64(len(p.Ex)+len(p.Ey)) * 16
+			s.bytes += int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
 		}
 		s.evict()
 	}()
@@ -292,7 +296,7 @@ func (s *Server) evict() {
 		}
 		e := s.runs[victim]
 		for _, p := range e.res.Planes {
-			s.bytes -= int64(len(p.Ex)+len(p.Ey)) * 16
+			s.bytes -= int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
 		}
 		delete(s.runs, victim)
 		s.order = append(s.order[:victimIdx], s.order[victimIdx+1:]...)
@@ -397,19 +401,38 @@ func (s *Server) serveProfile(w http.ResponseWriter, r *http.Request, pl *optics
 func fieldGetter(pl *optics.Plane, field string) func(i int) float64 {
 	ex := pl.Ex
 	ey := pl.Ey
+	ez := pl.Ez
 	switch field {
 	case "total":
 		return func(i int) float64 {
-			return norm2(ex[i]) + norm2(ey[i])
+			s := norm2(ex[i]) + norm2(ey[i])
+			if ez != nil {
+				s += norm2(ez[i])
+			}
+			return s
 		}
 	case "ex":
 		return func(i int) float64 { return norm2(ex[i]) }
 	case "ey":
 		return func(i int) float64 { return norm2(ey[i]) }
+	case "ez":
+		return func(i int) float64 {
+			if ez == nil {
+				return 0
+			}
+			return norm2(ez[i])
+		}
 	case "phase_x":
 		return func(i int) float64 { return math.Atan2(imag(ex[i]), real(ex[i])) }
 	case "phase_y":
 		return func(i int) float64 { return math.Atan2(imag(ey[i]), real(ey[i])) }
+	case "phase_z":
+		return func(i int) float64 {
+			if ez == nil {
+				return 0
+			}
+			return math.Atan2(imag(ez[i]), real(ez[i]))
+		}
 	}
 	return nil
 }

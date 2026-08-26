@@ -31,14 +31,17 @@ type GridSpec struct {
 //	  ]
 //	}
 type Config struct {
-	Grid       GridSpec       `json:"grid"`
-	Wavelength float64        `json:"wavelength"`
-	Polarized  *bool          `json:"polarized"`
-	Method     string         `json:"method"`
-	Evanescent string         `json:"evanescent"`
-	Bandlimit  *BandlimitOpts `json:"bandlimit"`
-	Source     SourceSpec     `json:"source"`
-	Elements   []ElementSpec  `json:"elements"`
+	Grid               GridSpec       `json:"grid"`
+	Wavelength         float64        `json:"wavelength"`
+	Polarized          *bool          `json:"polarized"`
+	Method             string         `json:"method"`
+	Evanescent         string         `json:"evanescent"`
+	EvanescentLimit    float64        `json:"evanescent_limit"`
+	BackwardRegularize bool           `json:"backward_regularize"`
+	TikhonovAlpha      float64        `json:"tikhonov_alpha"`
+	Bandlimit          *BandlimitOpts `json:"bandlimit"`
+	Source             SourceSpec     `json:"source"`
+	Elements           []ElementSpec  `json:"elements"`
 }
 
 // PolarizationEnabled returns whether Jones two-component simulation is on
@@ -49,8 +52,9 @@ func (c *Config) PolarizationEnabled() bool {
 
 // Limits enforced by validation to protect memory and CPU.
 const (
-	MaxGridSize = 2048
-	MinGridSize = 64
+	// 网格边长：允许小于 64、超过 2048，上限 65536×4（=262144）；超大网格将占用巨量内存。
+	MaxGridSize = 65536 * 4
+	MinGridSize = 2
 	MaxElements = 256
 	MaxPlanes   = 64
 	MaxArmDepth = 8
@@ -65,6 +69,7 @@ type Plane struct {
 	DX    float64
 	Ex    []complex128
 	Ey    []complex128
+	Ez    []complex128
 	Stats PlaneStats
 }
 
@@ -115,6 +120,9 @@ func Simulate(cfg Config) (*Result, error) {
 		}
 		return nil, fmt.Errorf("%s", msg)
 	}
+	if err := CheckGridMemory(cfg.Grid.Size); err != nil {
+		return nil, err
+	}
 	start := time.Now()
 	polarized := cfg.PolarizationEnabled()
 	f, err := BuildSource(cfg.Source, cfg.Grid.Size, cfg.Grid.Width, polarized, cfg.Wavelength)
@@ -122,10 +130,13 @@ func Simulate(cfg Config) (*Result, error) {
 		return nil, err
 	}
 	base := &Context{
-		Wavelength: cfg.Wavelength,
-		Evanescent: cfg.Evanescent,
-		Bandlimit:  cfg.Bandlimit,
-		Warnings:   &Warnings{},
+		Wavelength:         cfg.Wavelength,
+		Evanescent:         cfg.Evanescent,
+		EvanescentLimit:    cfg.EvanescentLimit,
+		BackwardRegularize: cfg.BackwardRegularize,
+		TikhonovAlpha:      cfg.TikhonovAlpha,
+		Bandlimit:          cfg.Bandlimit,
+		Warnings:           &Warnings{},
 	}
 	if base.Evanescent == "" {
 		base.Evanescent = "decay"
@@ -360,6 +371,7 @@ func (t *trainer) recordPlaneRaw(f *Field, armID, id, label string, strehl [2]fl
 		DX:    f.DX,
 		Ex:    append([]complex128(nil), f.Ex...),
 		Ey:    append([]complex128(nil), f.Ey...),
+		Ez:    append([]complex128(nil), f.Ez...),
 	}
 	p.Stats = ComputeStats(f, wl, strehl[0], strehl[1])
 	t.pl = append(t.pl, p)

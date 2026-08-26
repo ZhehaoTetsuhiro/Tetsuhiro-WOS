@@ -29,8 +29,8 @@ func ValidateConfig(cfg *Config) []Issue {
 
 	if cfg.Grid.Size < MinGridSize || cfg.Grid.Size > MaxGridSize {
 		add("grid.size", fmt.Sprintf("must be between %d and %d", MinGridSize, MaxGridSize))
-	} else if cfg.Grid.Size&(cfg.Grid.Size-1) != 0 {
-		add("grid.size", "must be a power of two")
+	} else if cfg.Grid.Size%2 != 0 {
+		add("grid.size", "must be even")
 	}
 	if !(cfg.Grid.Width > 0) || math.IsNaN(cfg.Grid.Width) {
 		add("grid.width", "must be > 0")
@@ -45,6 +45,9 @@ func ValidateConfig(cfg *Config) []Issue {
 	case "", "decay", "zero":
 	default:
 		add("evanescent", "must be decay or zero")
+	}
+	if cfg.EvanescentLimit < 0 {
+		add("evanescent_limit", "must be >= 0")
 	}
 	if cfg.Bandlimit != nil {
 		if cfg.Bandlimit.Fraction <= 0 || cfg.Bandlimit.Fraction > 1 {

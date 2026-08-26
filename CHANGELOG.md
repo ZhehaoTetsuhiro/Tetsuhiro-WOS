@@ -2,6 +2,25 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.3.0] - 2026-08-26
+
+### 新增
+
+- **全矢量角谱法**：`method=vectorial` 由散度条件 kx·Ex + ky·Ey + kz·Ez = 0 重构纵分量 Ez，并三分量传播（非傍轴），适合大 NA 聚焦；传感器可显示 |Ez|²。
+- **非均匀/复折射率介质**：`medium` 元件 + `PropagateSplitStep`（对称 split-step / Strang BPM），支持分层/梯度折射率与吸收/增益介质（复折射率）。
+- **各向异性/双折射介质**：`uniaxial` 元件（光轴沿 x 的单轴晶体，n_o/n_e）与 `biaxial` 元件（完整 Berreman 4×4 矩阵法，任意双轴/复介电张量，含 o/e 耦合）。
+- **宽带谱叠加**：`PropagatePolychromatic` 对波长谱逐波长传播后非相干叠加强度 I = Σ w_k·|U_k|²。
+- **部分相干光**：Gaussian Schell 模型（`GenerateSchellRealizations` / `PropagatePartiallyCoherent`），可调束腰与横向相干宽度，系综平均。
+- **3-D 体传播**：`Propagate3D` 把输入场一次传播到多个 z，输出 x,y,z 体积场（平面栈）。
+- **GUI 视觉升级**：毛玻璃质感（半透明面板 + 背景模糊 + 柔和渐变背景）、左上角标题后显示版本号（v0.3.0）、深蓝色填充「▶ 运行」按钮单独凸显。
+- **隐藏中心方形图案**：输出区新增「隐藏图案」按钮（h 键），仅隐去中心方形输出图样、保留剖面曲线，且隐藏后中心不再显示占位文字。
+- **网格大小自定义**：网格大小下拉框新增「自定义」，输入边长 a 即得 a×a 网格；允许小于 64、超过 2048，上限 65536×4（内核 MinGridSize=2、MaxGridSize=262144）。
+- **帮助多列布局**：? 帮助面板由单列表格改为多列排版，更紧凑易读。
+
+### 修复
+
+- 超大网格（如 65536）会触发进程级 OOM 崩溃：新增内存预算校验 `optics.CheckGridMemory`，估算峰值内存并与可用内存预算对比，超预算时返回干净错误而非致命崩溃。
+
 ## [v0.2.0] - 2026-08-26
 
 ### 新增
@@ -47,7 +66,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.2.0
 [v0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.1
 [v0.1.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.1.1

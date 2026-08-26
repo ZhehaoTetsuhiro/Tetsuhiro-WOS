@@ -102,8 +102,25 @@ var ElementDocs = []ElementDoc{
 	{Type: "propagate", Label: "自由传播", Help: "沿光束传播方向前进 distance 米；可单独指定传播算法。",
 		Params: []ParamSpec{
 			fp("distance", "距离", "m", 0, 100, 1e-3, 0.1, "沿光束方向的路程（反射后仍取正值，相位继续累加）"),
-			cp("method", "传播算法", []string{"auto", "asm", "asm_pad", "asm_shift", "fresnel_tf", "fresnel_ir", "fraunhofer"}, "auto", "留空/auto 使用全局算法"),
+			cp("method", "传播算法", []string{"auto", "asm", "asm_pad", "asm_shift", "asm_shift_pad", "vectorial", "fresnel_tf", "fresnel_ir", "fraunhofer"}, "auto", "留空/auto 使用全局算法"),
 		}},
+	{Type: "uniaxial", Label: "单轴晶体（双折射）", Help: "在光轴沿 x 的单轴晶体中传播：异常光(Ex)按 n_e、寻常光(Ey)按 n_o 色散。", Params: []ParamSpec{
+		fp("distance", "厚度", "m", 0, 1, 1e-4, 1e-3, ""),
+		fp("n_o", "寻常折射率 n_o", "", 1, 4, 0.01, 1.5, ""),
+		fp("n_e", "异常折射率 n_e", "", 1, 4, 0.01, 1.7, ""),
+	}},
+	{Type: "medium", Label: "均匀介质（吸收/增益）", Help: "在复折射率 n = index + i·absorption 的均匀介质中传播（split-step BPM）；absorption>0 吸收、<0 增益。", Params: []ParamSpec{
+		fp("distance", "厚度", "m", 0, 1, 1e-4, 1e-3, ""),
+		fp("index", "折射率", "", 1, 4, 0.01, 1.5, ""),
+		fp("absorption", "吸收系数 Im(n)", "", -1, 1, 1e-4, 0, ">0 吸收、<0 增益"),
+		ip("steps", "分步数", "", 1, 200, 20, "split-step 子步数（越大越准）"),
+	}},
+	{Type: "biaxial", Label: "双轴晶体（Berreman 4×4）", Help: "主轴折射率 n_x/n_y/n_z 的双轴晶体，完整 Berreman 4×4 各向异性传播（含 o/e 耦合，较慢）。", Params: []ParamSpec{
+		fp("distance", "厚度", "m", 0, 1, 1e-4, 1e-3, ""),
+		fp("n_x", "n_x", "", 1, 4, 0.01, 1.6, ""),
+		fp("n_y", "n_y", "", 1, 4, 0.01, 1.5, ""),
+		fp("n_z", "n_z", "", 1, 4, 0.01, 1.4, ""),
+	}},
 	{Type: "lens", Label: "薄透镜", Help: "相位 exp(-i k r^2/(2f))；f>0 会聚，f<0 发散，可带圆形孔径。",
 		Params: []ParamSpec{
 			fp("f", "焦距", "m", -100, 100, 1e-3, 0.1, "f>0 会聚"),
@@ -274,6 +291,8 @@ var MethodDocs = []struct {
 	{"asm", "角谱法（精确）", "亥姆霍兹方程在均匀介质中的精确解；无傍轴近似，默认推荐"},
 	{"asm_pad", "角谱法（零填充 2×，高精度）", "2N×2N 零填充做线性卷积，消除光束超出窗口时的环绕混叠；内存/耗时约 4×"},
 	{"asm_shift", "角谱法（离轴频移）", "搬移倾斜光束的载频后再传播，抑制频谱贴边混叠；适合大倾角照明"},
+	{"asm_shift_pad", "角谱法（离轴频移 + 零填充 2×）", "同时消除频谱贴边混叠与窗口环绕，适合大倾角且走离/发散的光束；内存/耗时约 4×"},
+	{"vectorial", "矢量角谱法（含 Ez，非傍轴）", "由散度条件重构纵分量 Ez 并三分量传播；适合大 NA 聚焦（传感器可显示 |Ez|²）"},
 	{"fresnel_tf", "菲涅尔（传递函数）", "傍轴近似；|z| <= N*dx^2/lambda 时有效"},
 	{"fresnel_ir", "菲涅尔（冲激响应）", "傍轴近似；|z| >= N*dx^2/lambda 时有效"},
 	{"fraunhofer", "夫琅禾费（远场）", "输出像素变为 lambda*|z|/(N*dx)；要求菲涅耳数 D^2/(lambda*z) << 1"},

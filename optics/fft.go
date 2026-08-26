@@ -128,13 +128,77 @@ var colBufPool = sync.Pool{New: func() any {
 	return &b
 }}
 
+// fft1DAny transforms a 1-D complex array of arbitrary length in place,
+// using the cached radix-2 core for power-of-two sizes and the Bluestein
+// (chirp-z) algorithm otherwise. It is the single entry point for 1-D FFTs.
+func fft1DAny(a []complex128, inverse bool) {
+	n := len(a)
+	if n&(n-1) == 0 {
+		fft1D(a, planFFT(n), inverse)
+		return
+	}
+	fft1DBluestein(a, inverse)
+}
+
+// fft1DBluestein computes the DFT of an arbitrary-length sequence in place via
+// the chirp-z transform: the identity n*k = (n^2 + k^2 - (k-n)^2)/2 turns the
+// DFT into a convolution, evaluated exactly on a power-of-two buffer of length
+// M >= 2N-1. inverse=true computes the inverse transform with 1/N scaling.
+func fft1DBluestein(a []complex128, inverse bool) {
+	n := len(a)
+	if n <= 1 {
+		if inverse {
+			a[0] /= complex(float64(n), 0)
+		}
+		return
+	}
+	m := 1
+	for m < 2*n-1 {
+		m <<= 1
+	}
+	sign := -1.0
+	if inverse {
+		sign = 1.0
+	}
+	chirp := make([]complex128, n)
+	for k := 0; k < n; k++ {
+		chirp[k] = cexpI(sign * math.Pi * float64(k*k) / float64(n))
+	}
+	a0 := make([]complex128, m)
+	b0 := make([]complex128, m)
+	for k := 0; k < n; k++ {
+		a0[k] = a[k] * chirp[k]
+	}
+	b0[0] = 1
+	for k := 1; k < n; k++ {
+		ck := complex(real(chirp[k]), -imag(chirp[k]))
+		b0[k] = ck
+		b0[m-k] = ck
+	}
+	plan := planFFT(m)
+	fft1D(a0, plan, false)
+	fft1D(b0, plan, false)
+	for k := range a0 {
+		a0[k] *= b0[k]
+	}
+	fft1D(a0, plan, true)
+	for k := 0; k < n; k++ {
+		a[k] = a0[k] * chirp[k]
+	}
+	if inverse {
+		inv := 1 / complex(float64(n), 0)
+		for k := range a {
+			a[k] *= inv
+		}
+	}
+}
+
 // fft2D transforms a (length n*n, row-major) in place.
 // A forward 2-D transform maps f(x,y) -> sum f exp(-i 2pi (fx x + fy y)).
 func fft2D(a []complex128, n int, inverse bool) {
-	plan := planFFT(n)
 	// Rows.
 	parFor(n, func(r int) {
-		fft1D(a[r*n:(r+1)*n], plan, inverse)
+		fft1DAny(a[r*n:(r+1)*n], inverse)
 	})
 	// Columns (stride n), each worker with its own scratch.
 	parFor(n, func(c int) {
@@ -148,7 +212,7 @@ func fft2D(a []complex128, n int, inverse bool) {
 		for r := 0; r < n; r++ {
 			col[r] = a[r*n+c]
 		}
-		fft1D(col, plan, inverse)
+		fft1DAny(col, inverse)
 		for r := 0; r < n; r++ {
 			a[r*n+c] = col[r]
 		}

@@ -8,7 +8,7 @@
 </head>
 <body>
 <header>
-  <h1>Tetsuhiro WOS</h1>
+  <h1>Tetsuhiro WOS <span class="version">v0.3.0</span></h1>
   <div class="status" id="status" role="status" aria-live="polite">加载中…</div>
   <button id="newBtn" title="新建空白光路 (n)">新建 (n)</button>
   <button id="openBtn" title="打开 JSON 配置文件 (o)">打开 (o)</button>
@@ -70,9 +70,12 @@
         <button role="tab" data-view="ey">3 |Ey|²</button>
         <button role="tab" data-view="phase_x">4 相位 Ex</button>
         <button role="tab" data-view="phase_y">5 相位 Ey</button>
+        <button role="tab" data-view="ez">6 |Ez|²</button>
+        <button role="tab" data-view="phase_z">7 相位 Ez</button>
         <button id="profBtn">p 剖面</button>
         <button id="scaleBtn">l 对数</button>
         <button id="exportSvgBtn" title="导出 X/Y 两个剖面曲线为矢量 SVG">导出 SVG</button>
+        <button id="hidePatternBtn" title="仅隐藏/显示中心方形图案 (h)，不影响剖面曲线">隐藏图案</button>
       </div>
       <div id="canvasWrap">
         <canvas id="view" width="512" height="512"></canvas>
@@ -92,13 +95,13 @@
 </main>
 
 <footer>
-  <span>Tab 移动焦点 · f 逐个定位参数 · ↑↓ 选择元件 · Shift+↑↓ 排序 · i 插入 · d 删除 · ▶ 运行/空格 · q/e 切换平面 · 1-5 视图 · p 剖面 · l 对数/线性 · j JSON · n 新建 · o 打开 · s 保存 · Enter 进入反射臂 · Esc 返回/关闭 · m 模式切换 · ? 帮助（鼠标可直接点击操作）</span>
+  <span>Tab 移动焦点 · f 逐个定位参数 · ↑↓ 选择元件 · Shift+↑↓ 排序 · i 插入 · d 删除 · ▶ 运行/空格 · q/e 切换平面 · 1-7 视图 · p 剖面 · h 隐藏图案 · l 对数/线性 · j JSON · n 新建 · o 打开 · s 保存 · Enter 进入反射臂 · Esc 返回/关闭 · m 模式切换 · ? 帮助（鼠标可直接点击操作）</span>
 </footer>
 
 <div id="helpOverlay" class="overlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
     <h2 id="helpTitle">键盘操作指南</h2>
-    <table id="helpTable"></table>
+    <div id="helpTable"></div>
     <button id="helpClose">关闭 (Esc)</button>
   </div>
 </div>

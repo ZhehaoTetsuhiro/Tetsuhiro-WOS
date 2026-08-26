@@ -24,9 +24,9 @@
 
 ## 2. 核心类型
 
-    type Field struct { N int; DX float64; Polarized bool; Ex, Ey []complex128 }
-    type Context struct { Wavelength float64; Evanescent string; Bandlimit *BandlimitOpts; RNG *rand.Rand; Warnings *Warnings }
-    type Config struct { Grid GridSpec; Wavelength float64; Polarized *bool; Method, Evanescent string; Bandlimit *BandlimitOpts; Source SourceSpec; Elements []ElementSpec }
+    type Field struct { N int; DX float64; Polarized bool; Vectorial bool; Ex, Ey, Ez []complex128 }
+    type Context struct { Wavelength float64; Evanescent string; EvanescentLimit float64; BackwardRegularize bool; TikhonovAlpha float64; Bandlimit *BandlimitOpts; RNG *rand.Rand; Warnings *Warnings }
+    type Config struct { Grid GridSpec; Wavelength float64; Polarized *bool; Method, Evanescent string; EvanescentLimit float64; BackwardRegularize bool; TikhonovAlpha float64; Bandlimit *BandlimitOpts; Source SourceSpec; Elements []ElementSpec }
     type Result struct { RunID string; Size, Width, DX, Wavelength, ElapsedMS float64...; Warnings []Warning; Planes []*Plane }
     type Plane  struct { ID, Label, Path string; Size int; DX float64; Ex, Ey []complex128; Stats PlaneStats }
 
@@ -44,10 +44,18 @@
     optics.Propagate(f, 0.1, optics.MethodASM, ctx)  // 传播 0.1 m
 
 - Propagate 支持负 z（逆传播）；衰逝波在负 z 时自动置零并告警 backward_evanescent。
-- 高精度变体：MethodASMPad（2N 零填充线性卷积）与 MethodASMShift（离轴载频搬移），见 PHYSICS.md §3.1。
+- 高精度变体：MethodASMPad（2N 零填充线性卷积）、MethodASMShift（离轴载频搬移）与 MethodASMShiftPad（载频搬移+零填充组合），见 PHYSICS.md §3.1。
 - ApplyBandlimit 可对任意场做奈奎斯特带限（参数含义见 PHYSICS.md §3）。Propagate 本身不再自动带限——由模拟器 trainer 在每平面后施加一次，避免对 propagate 元件重复滤波；低层直接调用 Propagate 时如需带限请显式调用 ApplyBandlimit。
 - Field.ApplyTilt 用精确方向余弦（非傍轴）；Field.ApplyJones 处理标量→矢量升维。
 - 功率归一化：Field.NormalizePower(p)；功率读取 Field.Power()（W）。
+- 1-D 横向场（x-z 剖面，柱面问题）：Propagate1D(a []complex128, dx, z, wl, ctx) 对任意长度一维场做角谱传播（复用 Bluestein FFT），衰逝波策略与 2-D 一致。
+- 非均匀/复折射率介质：PropagateSplitStep(f, z, n IndexFunc, steps, ctx) 做对称 split-step（Strang）BPM；n(x,y,z) 可为复折射率（Im>0 吸收、Im<0 增益），支持分层/梯度介质；UniformIndex(n) 构造常数折射率。
+- 宽带谱叠加：PropagatePolychromatic(f, z, samples []WavelengthSample, method, ctx) 对 λ 谱逐波长传播后非相干叠加强度 I=Σ w_k·|U_k|²。
+- 全矢量 ASM（含 Ez，非傍轴）：PropagateVectorial(f, z, ctx) 由散度条件 Ez=-(kx Ex+ky Ey)/kz 重构纵分量并三分量传播；NewVectorialField(n, dx) 构造三分量场。
+- 3-D 体传播：Propagate3D(f, zs, method, ctx) 把输入场一次传播到多个 z，返回平面栈（x,y,z 体积场）。
+- 部分相干（Gaussian Schell 模型）：GenerateSchellRealizations(n, dx, SchellSourceParams{Width,Coherence,Seed}, m) 生成 m 个满足 I=exp(-2r²/w0²)、μ=exp(-|dr|²/(2σc²)) 的相干实现；AverageIntensity 做系综平均；PropagatePartiallyCoherent 生成+传播+平均（非相干叠加）。
+- 各向异性/双折射介质：PropagateUniaxial(f, z, no, ne, ctx) 在光轴沿 x 的单轴晶体中传播；PropagateAnisotropic(f, z, eps [3][3]complex128, ctx) 用完整 Berreman 4×4 传播任意（双轴/复）介电张量。
+- 传播介质元件（已注册，GUI 可用）：uniaxial{n_o,n_e,distance}、medium{index,absorption,steps,distance}（split-step）、biaxial{n_x,n_y,n_z,distance}（Berreman）。矢量角谱法 method=vectorial 会填充 Plane.Ez，GUI 视图 6/7 显示 |Ez|²/相位。
 
 ## 4. 新增一种光学元件（完整配方）
 
@@ -125,7 +133,7 @@
 - beamsplitter：先克隆反射臂场（i√R·e^{iφ}），再缩放透射主场（√(1−R)）；反射臂作为子光路**深度优先**执行（trainer.runTrain 递归，≤8 层），臂末场登记于 t.arms[armID]。
 - combiner：终结元件；按权重 Σ w_ji·arm_i 相干叠加（"main" 指当前光路自身场），各臂 DX 必须一致。
 
-限制常量（validate.go）：MaxGridSize=2048、MaxElements=256、MaxPlanes=64、MaxArmDepth=8。
+限制常量（simulator.go）：MinGridSize=2、MaxGridSize=65536×4（=262144）、MaxElements=256、MaxPlanes=64、MaxArmDepth=8。
 
 ## 8. 并发与内存
 

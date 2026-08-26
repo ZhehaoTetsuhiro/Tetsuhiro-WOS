@@ -121,9 +121,15 @@ func (p *Plane) ProfileOf(axis, kind string, coord *float64) (Profile, error) {
 		ey := p.Ey[idx]
 		ix := real(ex)*real(ex) + imag(ex)*imag(ex)
 		iy := real(ey)*real(ey) + imag(ey)*imag(ey)
+		var iz float64
+		var ezv complex128
+		if p.Ez != nil {
+			ezv = p.Ez[idx]
+			iz = real(ezv)*real(ezv) + imag(ezv)*imag(ezv)
+		}
 		switch kind {
 		case KindIntensity:
-			return ix + iy
+			return ix + iy + iz
 		case KindPhaseX:
 			return math.Atan2(imag(ex), real(ex))
 		case KindPhaseY:
@@ -132,8 +138,12 @@ func (p *Plane) ProfileOf(axis, kind string, coord *float64) (Profile, error) {
 			return ix
 		case KindEy:
 			return iy
+		case "ez":
+			return iz
+		case "phase_z":
+			return math.Atan2(imag(ezv), real(ezv))
 		}
-		return ix + iy
+		return ix + iy + iz
 	}
 	prof := Profile{Axis: axis, X: make([]float64, n), V: make([]float64, n)}
 	if axis == "x" {

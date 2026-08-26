@@ -133,6 +133,9 @@ func init() {
 	RegisterElement("retarder", newRetarder)
 	RegisterElement("rotator", newRotator)
 	RegisterElement("custom_jones", newCustomJones)
+	RegisterElement("uniaxial", newUniaxial)
+	RegisterElement("medium", newMedium)
+	RegisterElement("biaxial", newBiaxial)
 }
 
 // ---- lenses ----------------------------------------------------------------
@@ -896,4 +899,76 @@ func newCustomJones(p map[string]any) (Element, error) {
 func (e *customJonesEl) Apply(f *Field, ctx *Context) error {
 	f.ApplyJones(e.a, e.b, e.c, e.d)
 	return nil
+}
+
+// ---- propagation media (structural, registered as elements) ----------------
+
+type uniaxialEl struct{ distance, no, ne float64 }
+
+func newUniaxial(p map[string]any) (Element, error) {
+	d, err := pf(p, "distance", 0)
+	if err != nil || d < 0 {
+		return nil, fmt.Errorf("uniaxial: distance must be >= 0")
+	}
+	no := pfd(p, "n_o", 1.5)
+	ne := pfd(p, "n_e", 1.7)
+	if no <= 0 || ne <= 0 {
+		return nil, fmt.Errorf("uniaxial: n_o and n_e must be > 0")
+	}
+	return &uniaxialEl{distance: d, no: no, ne: ne}, nil
+}
+
+func (e *uniaxialEl) Apply(f *Field, ctx *Context) error {
+	return PropagateUniaxial(f, e.distance, e.no, e.ne, ctx)
+}
+
+type mediumEl struct {
+	distance   float64
+	index      float64
+	absorption float64
+	steps      int
+}
+
+func newMedium(p map[string]any) (Element, error) {
+	d, err := pf(p, "distance", 0)
+	if err != nil || d < 0 {
+		return nil, fmt.Errorf("medium: distance must be >= 0")
+	}
+	idx := pfd(p, "index", 1.5)
+	if idx <= 0 {
+		return nil, fmt.Errorf("medium: index must be > 0")
+	}
+	return &mediumEl{distance: d, index: idx, absorption: pfd(p, "absorption", 0), steps: pi_(p, "steps", 20)}, nil
+}
+
+func (e *mediumEl) Apply(f *Field, ctx *Context) error {
+	return PropagateSplitStep(f, e.distance, UniformIndex(complex(e.index, e.absorption)), e.steps, ctx)
+}
+
+type biaxialEl struct {
+	distance   float64
+	nx, ny, nz float64
+}
+
+func newBiaxial(p map[string]any) (Element, error) {
+	d, err := pf(p, "distance", 0)
+	if err != nil || d < 0 {
+		return nil, fmt.Errorf("biaxial: distance must be >= 0")
+	}
+	nx := pfd(p, "n_x", 1.6)
+	ny := pfd(p, "n_y", 1.5)
+	nz := pfd(p, "n_z", 1.4)
+	if nx <= 0 || ny <= 0 || nz <= 0 {
+		return nil, fmt.Errorf("biaxial: n_x, n_y, n_z must be > 0")
+	}
+	return &biaxialEl{distance: d, nx: nx, ny: ny, nz: nz}, nil
+}
+
+func (e *biaxialEl) Apply(f *Field, ctx *Context) error {
+	eps := [3][3]complex128{
+		{complex(e.nx*e.nx, 0), 0, 0},
+		{0, complex(e.ny*e.ny, 0), 0},
+		{0, 0, complex(e.nz*e.nz, 0)},
+	}
+	return PropagateAnisotropic(f, e.distance, eps, ctx)
 }

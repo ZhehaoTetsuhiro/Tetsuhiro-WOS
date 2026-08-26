@@ -22,6 +22,7 @@ const S = {
   ctx: [],           // [{bsIndex, label}] 臂上下文栈
   autoRun: false,     // 默认关闭：修改参数后不自动重算，需手动「▶ 运行」
   profileAxis: null, // null | 'x' | 'y'
+  hidePattern: false, // 是否隐藏中心输出图案
   cache: new Map(),
   timer: null,
   insertSel: 0,
@@ -303,11 +304,18 @@ function renderCombiner(el, panel) {
   panel.appendChild(box);
 }
 
+function clampGridSize(v) {
+  let n = Math.round(v);
+  if (n % 2 !== 0) n += 1; // 内核校验要求偶数
+  return Math.max(2, Math.min(65536 * 4, n)); // 上限 65536×4 = 262144
+}
+
 function renderGlobals() {
   const panel = $("#globalPanel");
   panel.innerHTML = "";
   const g = S.config;
   const sizes = [128, 256, 512, 1024, 2048];
+  const isCustom = !sizes.includes(g.grid.size);
   const row1 = document.createElement("div");
   row1.className = "prow";
   row1.appendChild(Object.assign(document.createElement("label"), { textContent: "网格大小" }));
@@ -318,9 +326,37 @@ function renderGlobals() {
     if (g.grid.size === n) o.selected = true;
     ssel.appendChild(o);
   });
-  ssel.addEventListener("change", () => { g.grid.size = Number(ssel.value); scheduleRun(); });
+  const custOpt = document.createElement("option");
+  custOpt.value = "custom"; custOpt.textContent = "自定义";
+  if (isCustom) custOpt.selected = true;
+  ssel.appendChild(custOpt);
   row1.appendChild(ssel);
   panel.appendChild(row1);
+
+  // 自定义边长行（仅当选择“自定义”时显示）
+  const row2 = document.createElement("div");
+  row2.className = "prow";
+  row2.appendChild(Object.assign(document.createElement("label"), { textContent: "边长 a [px]" }));
+  const cinp = document.createElement("input");
+  cinp.type = "number";
+  cinp.min = 2; cinp.max = 65536 * 4; cinp.step = 2;
+  cinp.value = g.grid.size;
+  cinp.title = "自定义网格边长 a（网格为 a×a 像素，偶数，允许小于 64，不超过 65536×4）";
+  bindNumInput(cinp, () => g.grid.size, (v) => { g.grid.size = clampGridSize(v); }, () => scheduleRun(), () => scheduleRun());
+  row2.appendChild(cinp);
+  row2.hidden = !isCustom;
+  panel.appendChild(row2);
+
+  ssel.addEventListener("change", () => {
+    if (ssel.value === "custom") {
+      row2.hidden = false;
+      cinp.focus(); cinp.select();
+    } else {
+      row2.hidden = true;
+      g.grid.size = Number(ssel.value);
+      scheduleRun();
+    }
+  });
 
   const mk = (label, unit, get, set, opts) => {
     const row = document.createElement("div");
@@ -385,6 +421,20 @@ function renderGlobals() {
   bcb.addEventListener("change", () => { g.bandlimit = bcb.checked ? { fraction: 0.9, sigma: 0.05 } : null; scheduleRun(); });
   brow2.appendChild(bcb);
   panel.appendChild(brow2);
+
+  panel.appendChild(mk("衰逝波截断阈值", "nepers", () => g.evanescent_limit || 0, (v) => { g.evanescent_limit = v; }, { step: 0.1, min: 0 }));
+
+  const breg = document.createElement("div");
+  breg.className = "prow";
+  breg.appendChild(Object.assign(document.createElement("label"), { textContent: "反向 Tikhonov 正则化", title: "负 z 传播时用阻尼逆 A/(1+(αA)²) 替代置零" }));
+  const bcb2 = document.createElement("input");
+  bcb2.type = "checkbox";
+  bcb2.checked = !!g.backward_regularize;
+  bcb2.addEventListener("change", () => { g.backward_regularize = bcb2.checked; scheduleRun(); });
+  breg.appendChild(bcb2);
+  panel.appendChild(breg);
+
+  panel.appendChild(mk("Tikhonov α", "", () => g.tikhonov_alpha || 0, (v) => { g.tikhonov_alpha = v; }, { step: 0.001, min: 0 }));
 }
 
 function renderSource() {
@@ -532,7 +582,7 @@ function renderView() {
   if (!S.meta || !S.meta.planes.length) { cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); return; }
   const p = S.meta.planes[S.planeIdx];
   const n = p.size;
-  const isPhase = S.view === "phase_x" || S.view === "phase_y";
+  const isPhase = S.view === "phase_x" || S.view === "phase_y" || S.view === "phase_z";
   const rid = S.runId;
   fetchPlane(p.id, S.view).then((arr) => {
     if (S.runId !== rid) return; // 过期响应（新的运行已开始）丢弃
@@ -580,7 +630,7 @@ function drawProfile() {
       let vmin = Infinity, vmax = -Infinity;
       for (const y of v) { if (y < vmin) vmin = y; if (y > vmax) vmax = y; }
       if (vmax - vmin < 1e-30) return;
-      const isPhase = S.view === "phase_x" || S.view === "phase_y";
+      const isPhase = S.view === "phase_x" || S.view === "phase_y" || S.view === "phase_z";
       const pad = 30, w = pc.width - 2 * pad, h = pc.height - 2 * pad;
       ctx.strokeStyle = "rgba(20,40,60,.25)";
       ctx.beginPath(); ctx.moveTo(pad, pc.height - pad); ctx.lineTo(pc.width - pad, pc.height - pad); ctx.stroke();
@@ -612,6 +662,22 @@ function stepPlane(d) {
   if (!n) return;
   S.planeIdx = Math.min(n - 1, Math.max(0, S.planeIdx + d));
   renderPlanes(); renderStats(); renderView();
+}
+
+// 隐藏/显示中心输出图案（h 键或「隐藏图案 / 显示图案」按钮）。
+function togglePattern() {
+  S.hidePattern = !S.hidePattern;
+  renderPatternVisibility();
+}
+function renderPatternVisibility() {
+  const hidden = !!S.hidePattern;
+  // 仅隐藏中心方形图样（#view），剖面曲线（#prof）保持显示，不显示任何占位文字。
+  $("#view").hidden = hidden;
+  const btn = $("#hidePatternBtn");
+  if (btn) {
+    btn.textContent = hidden ? "显示图案" : "隐藏图案";
+    btn.classList.toggle("active", hidden);
+  }
 }
 
 // 隐藏对话框并把焦点交还给页面主体，避免焦点残留在隐藏控件里导致全局快捷键失效。
@@ -764,10 +830,11 @@ const HELP_ROWS = [
   ["▶ 运行 / 空格 / Ctrl+Enter", "运行模拟（修改参数后不自动运行）"],
   ["Enter", "进入当前分束器的反射臂（选中分束器时；按钮上触发按钮，输入框内确认参数）"],
   ["q / e", "上一个 / 下一个输出平面（焦点不在输入框内时）"],
-  ["1 / 2 / 3 / 4 / 5", "视图：总强度 / |Ex|² / |Ey|² / 相位 Ex / 相位 Ey"],
+  ["1 - 7", "视图：总强度 / |Ex|² / |Ey|² / 相位 Ex / 相位 Ey / |Ez|² / 相位 Ez"],
   ["p", "显示/隐藏一维剖面"],
   ["x / y", "剖面方向：横向 / 纵向"],
   ["l", "强度视图 对数/线性 标度切换"],
+  ["h", "隐藏/显示中心输出图案"],
   ["a", "自动运行开关（默认关闭）"],
   ["j", "高级：直接编辑配置 JSON"],
   ["n", "新建空白光路"],
@@ -782,11 +849,16 @@ function openHelp() {
   const t = $("#helpTable");
   t.innerHTML = "";
   HELP_ROWS.forEach(([k, v]) => {
-    const tr = document.createElement("tr");
-    const td1 = document.createElement("td"); td1.textContent = k;
-    const td2 = document.createElement("td"); td2.textContent = v;
-    tr.append(td1, td2);
-    t.appendChild(tr);
+    const item = document.createElement("div");
+    item.className = "help-item";
+    const key = document.createElement("div");
+    key.className = "help-key";
+    key.textContent = k;
+    const desc = document.createElement("div");
+    desc.className = "help-desc";
+    desc.textContent = v;
+    item.append(key, desc);
+    t.appendChild(item);
   });
   $("#helpClose").focus();
 }
@@ -834,6 +906,9 @@ function blankConfig() {
     polarized: false,
     method: "asm",
     evanescent: "decay",
+    evanescent_limit: 0,
+    backward_regularize: false,
+    tikhonov_alpha: 0,
     bandlimit: { fraction: 0.9, sigma: 0.05 },
     source: { type: "plane", params: { power: 1e-3 } },
     elements: [],
@@ -968,6 +1043,8 @@ document.addEventListener("keydown", (e) => {
     case "3": setView("ey"); break;
     case "4": setView("phase_x"); break;
     case "5": setView("phase_y"); break;
+    case "6": setView("ez"); break;
+    case "7": setView("phase_z"); break;
     case "f": jumpFocus(); break;
     case "q": stepPlane(-1); break;
     case "e": if (e.ctrlKey) break; stepPlane(1); break;
@@ -978,6 +1055,7 @@ document.addEventListener("keydown", (e) => {
     case "i": e.preventDefault(); openInsert(); break;  // 阻止默认动作：避免 "i" 被敲进过滤框
     case "d": case "Delete": delEl(); break;
     case "p": S.profileAxis = S.profileAxis ? null : "x"; drawProfile(); break;
+    case "h": togglePattern(); break;
     case "x": if (S.profileAxis) { S.profileAxis = "x"; drawProfile(); } break;
     case "y": if (S.profileAxis) { S.profileAxis = "y"; drawProfile(); } break;
     case "l": S.scale = S.scale === "log" ? "lin" : "log";
@@ -1251,8 +1329,8 @@ function plotProfileBlock(out, prof, field, axis, oy) {
   const ml = 78, mr = 22, mt = 44, mb = 48;
   const pw = W - ml - mr, ph = H - mt - mb;
   const x = prof.x, v = prof.v;
-  const fieldLabel = { total: "总强度", ex: "|Ex|²", ey: "|Ey|²", phase_x: "相位 Ex", phase_y: "相位 Ey" }[field] || field;
-  const unit = (field === "phase_x" || field === "phase_y") ? "rad" : "W/m²";
+  const fieldLabel = { total: "总强度", ex: "|Ex|²", ey: "|Ey|²", ez: "|Ez|²", phase_x: "相位 Ex", phase_y: "相位 Ey", phase_z: "相位 Ez" }[field] || field;
+  const unit = (field === "phase_x" || field === "phase_y" || field === "phase_z") ? "rad" : "W/m²";
   const ty = (yy) => (yy + oy).toFixed(1);
   if (!x || !x.length || x.length < 2) {
     out.push('<text x="' + (W / 2) + '" y="' + ty(H / 2) + '" text-anchor="middle" font-size="13" fill="#33475c">无剖面数据（' + axis.toUpperCase() + '）</text>');
@@ -1435,6 +1513,7 @@ async function init() {
   $("#qExportPng").addEventListener("click", qExportPng);
   $("#qExportSvg").addEventListener("click", qExportSvg);
   $("#exportSvgBtn").addEventListener("click", exportWaveSvg);
+  $("#hidePatternBtn").addEventListener("click", togglePattern);
   $("#fileOpen").addEventListener("change", (ev) => {
     const f = ev.target.files && ev.target.files[0];
     if (f) openFile(f);
