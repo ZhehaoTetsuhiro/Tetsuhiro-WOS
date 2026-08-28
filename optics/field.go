@@ -256,8 +256,13 @@ type Warning struct {
 	Value   float64 `json:"value,omitempty"`
 }
 
-// Add records a warning; identical codes accumulate a count.
+// Add records a warning; identical codes accumulate a count. A nil *Warnings
+// (e.g. a Context built by a low-level Propagate caller) silently drops the
+// diagnostic instead of panicking.
 func (w *Warnings) Add(code, msg string, value float64) {
+	if w == nil {
+		return
+	}
 	if w.seen == nil {
 		w.seen = map[string]int{}
 	}

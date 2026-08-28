@@ -135,3 +135,68 @@ func TestFresnelMatchesASM(t *testing.T) {
 		t.Fatalf("Fresnel-TF deviates from ASM by %g", rel)
 	}
 }
+
+// The Fresnel impulse-response form must agree with ASM in its validity region
+// (z >= N*dx^2/lambda) as a complex field: amplitude AND phase. This guards the
+// Riemann-sum dx^2 factor, the wrap-layout convolution kernel, and the absence
+// of the spurious output quadratic phase (all three were once wrong together,
+// which intensity-only checks could not see).
+func TestFresnelIRMatchesASM(t *testing.T) {
+	n, dx, wl := 256, 4e-6, 632.8e-9
+	w0 := 100e-6
+	z := 0.05 // N*dx^2/lambda = 6.47e-3 m << z
+	if z < float64(n)*dx*dx/wl {
+		t.Fatalf("test setup outside IR validity region")
+	}
+	f := NewField(n, dx, false)
+	for j := 0; j < n; j++ {
+		y := f.Y(j)
+		for i := 0; i < n; i++ {
+			x := f.X(i)
+			f.Ex[j*n+i] = complex(math.Exp(-(x*x+y*y)/(w0*w0)), 0)
+		}
+	}
+	ref := f.Clone()
+	if err := Propagate(ref, z, MethodASM, ctxFor(wl)); err != nil {
+		t.Fatal(err)
+	}
+	g := f.Clone()
+	if err := Propagate(g, z, MethodFresnelIR, ctxFor(wl)); err != nil {
+		t.Fatal(err)
+	}
+	var num, den float64
+	for i := range ref.Ex {
+		d := real(g.Ex[i]) - real(ref.Ex[i])
+		e := imag(g.Ex[i]) - imag(ref.Ex[i])
+		num += d*d + e*e
+		den += real(ref.Ex[i])*real(ref.Ex[i]) + imag(ref.Ex[i])*imag(ref.Ex[i])
+	}
+	// With the zero-padded linear convolution the IR form matches ASM to
+	// roundoff-level discretization error in this regime; the threshold keeps
+	// two orders of margin while still catching any reintroduced kernel-layout,
+	// normalization or phase error (those show up at O(0.1) or larger).
+	if rel := math.Sqrt(num / den); rel > 1e-4 {
+		t.Fatalf("Fresnel-IR deviates from ASM by %g", rel)
+	}
+	// Phase: over bright pixels the ratio g/ref must be a constant phase.
+	var peak float64
+	for i := range ref.Ex {
+		if a := math.Hypot(real(ref.Ex[i]), imag(ref.Ex[i])); a > peak {
+			peak = a
+		}
+	}
+	ph0 := 0.0
+	first := true
+	for i := range ref.Ex {
+		if math.Hypot(real(ref.Ex[i]), imag(ref.Ex[i])) < 0.2*peak {
+			continue
+		}
+		ph := math.Atan2(imag(g.Ex[i]/ref.Ex[i]), real(g.Ex[i]/ref.Ex[i]))
+		if first {
+			ph0, first = ph, false
+		}
+		if d := math.Abs(math.Remainder(ph-ph0, 2*math.Pi)); d > 1e-3 {
+			t.Fatalf("Fresnel-IR phase deviates from ASM by %g rad at index %d", d, i)
+		}
+	}
+}

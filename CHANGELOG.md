@@ -2,6 +2,20 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.3.1] - 2026-08-28
+
+### 新增
+
+- **孔径光阑按形状分参数 + 更多形状**：孔径光阑（aperture）切换形状后，GUI 仅显示该形状对应的参数（show_if 条件可见性）；新增方孔、三角孔、十字孔、星形孔、超椭圆孔，并支持用顶点列表自定义任意多边形孔（shape=custom）。三角/多边形/星形/自定义形状现也支持边缘平滑（edge_sigma）。
+
+### 修复
+
+- 全局参数栏「传播算法」「光源类型」下拉列表超出面板外框：`select` 增加 `min-width:0` 并按最长可伸缩空间收缩（超宽选项截断显示省略号），量子门表格内的下拉框同步修正。
+- Fresnel 冲激响应法在裸网格上做圆周卷积会产生环绕伪影：改为零填充 2N×2N 网格上的线性卷积（输出窗口边缘的虚假 stationary point 伪影消除），并在 |z| < N·dx²/λ 时给出混叠告警。
+- Berreman 4×4 前向本征模出现重复/退化根时 2×2 求解奇异产生 NaN：增加防御性回退，跳过已选根并取剩余根中实部最大者，保证两个本征向量互异。
+- 量子图表渲染器对畸形结果（nil、切片过短、异常大的 Cutoff）可能 panic 或耗尽内存：统一经 `quantumChartDims` 清洗光子数范围与模式数。
+- 仿真 goroutine 内的 panic 现被 recover 并转为错误信息返回给前端，不再导致进程崩溃；`optics.Warnings.Add` 对 nil 接收者静默丢弃诊断而非 panic。
+
 ## [v0.3.0] - 2026-08-26
 
 ### 新增
@@ -66,7 +80,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.1...HEAD
+[v0.3.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.2.0
 [v0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.1

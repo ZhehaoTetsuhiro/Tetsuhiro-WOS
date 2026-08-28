@@ -97,7 +97,10 @@ function elSummary(el) {
   switch (el.type) {
     case "propagate": return "z=" + fmtNum(p.distance) + "m";
     case "lens": return "f=" + fmtNum(p.f) + "m";
-    case "aperture": return p.shape || "circle";
+    case "aperture": {
+      const names = { circle: "圆孔", square: "方孔", rectangle: "矩孔", ellipse: "椭圆孔", triangle: "三角孔", ring: "环形孔", polygon: "多边形孔", double_slit: "双缝", cross: "十字孔", star: "星形孔", superellipse: "超椭圆孔", custom: "自定义孔" };
+      return names[p.shape] || p.shape || "circle";
+    }
     case "grating": return (p.kind || "") + " Λ=" + fmtNum(p.period) + "m";
     case "sensor": return p.label || "";
     case "beamsplitter": return "R=" + fmtNum(p.reflectivity);
@@ -157,7 +160,33 @@ function bindNumInput(inp, get, set, onLive, onCommit) {
   });
 }
 
-function mkParamRow(doc, get, set) {
+// show_if 条件：逗号分隔的多个条件需同时满足；每个条件为 key=value（value 用 | 分隔多个可选值）。
+function paramVisible(pd, params) {
+  const cond = pd.show_if;
+  if (!cond) return true;
+  return String(cond).split(",").every((c) => {
+    const eq = c.indexOf("=");
+    if (eq < 0) return true;
+    const key = c.slice(0, eq).trim();
+    const vals = c.slice(eq + 1).trim().split("|");
+    const cur = params[key];
+    return vals.some((v) => String(cur) === v);
+  });
+}
+
+function showIfKeys(cond) {
+  if (!cond) return [];
+  return String(cond).split(",").map((c) => {
+    const eq = c.indexOf("=");
+    return eq < 0 ? "" : c.slice(0, eq).trim();
+  }).filter(Boolean);
+}
+
+function hasDependent(list, key) {
+  return list.some((pd) => pd.show_if && showIfKeys(pd.show_if).includes(key));
+}
+
+function mkParamRow(doc, get, set, onChoice) {
   const row = document.createElement("div");
   row.className = "prow";
   const lab = document.createElement("label");
@@ -173,7 +202,8 @@ function mkParamRow(doc, get, set) {
       if (String(val) === String(c)) o.selected = true;
       sel.appendChild(o);
     });
-    sel.addEventListener("change", () => { set(sel.value); scheduleRun(); });
+    sel.dataset.key = doc.key;
+    sel.addEventListener("change", () => { set(sel.value); scheduleRun(); if (onChoice) onChoice(); });
     row.appendChild(sel);
   } else if (doc.kind === "bool") {
     const cb = document.createElement("input");
@@ -214,6 +244,7 @@ function renderParams() {
   panel.appendChild(h);
   const params = el.params || (el.params = {});
   doc.params.forEach((pd) => {
+    if (pd.kind !== "nested" && !paramVisible(pd, params)) return;
     if (pd.kind === "nested") {
       const row = document.createElement("div");
       row.className = "prow";
@@ -232,7 +263,12 @@ function renderParams() {
       panel.appendChild(row);
       return;
     }
-    panel.appendChild(mkParamRow(pd, () => params[pd.key], (v) => { params[pd.key] = v; }));
+    let onChoice;
+    if (pd.kind === "choice" && hasDependent(doc.params, pd.key)) {
+      const key = pd.key;
+      onChoice = () => { renderParams(); const s = panel.querySelector('select[data-key="' + key + '"]'); if (s) s.focus(); };
+    }
+    panel.appendChild(mkParamRow(pd, () => params[pd.key], (v) => { params[pd.key] = v; }, onChoice));
   });
   if (el.type === "combiner") renderCombiner(el, panel);
 }

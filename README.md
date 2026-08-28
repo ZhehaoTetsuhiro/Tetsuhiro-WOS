@@ -15,8 +15,8 @@
 
 本项目分两个发布通道：
 
-- **Release**（`v0.3.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0`，`docker/podman run` 直接运行。
+- **Release**（`v0.3.1`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.1`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -27,8 +27,8 @@
 
 容器镜像：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0
-    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.0
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.1
+    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.1
 
 ## 快速开始
 

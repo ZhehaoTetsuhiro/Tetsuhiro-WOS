@@ -14,6 +14,11 @@ type ParamSpec struct {
 	Default any      `json:"default"`
 	Choices []string `json:"choices,omitempty"`
 	Help    string   `json:"help,omitempty"`
+	// ShowIf is a simple visibility condition: a comma-separated AND list of
+	// "key=value" terms where value may be a "|"-separated OR list, e.g.
+	// "shape=circle|ring" or "shape=circle,kind=phase". The GUI hides the
+	// parameter unless every term matches the element's current params.
+	ShowIf string `json:"show_if,omitempty"`
 }
 
 // ElementDoc documents one element (or source) type for the catalog API.
@@ -42,6 +47,12 @@ func bp(key, label string, def bool, help string) ParamSpec {
 
 func tp(key, label, def, help string) ParamSpec {
 	return ParamSpec{Key: key, Label: label, Kind: "text", Default: def, Help: help}
+}
+
+// showIf attaches a visibility condition to a parameter (see ParamSpec.ShowIf).
+func showIf(spec ParamSpec, cond string) ParamSpec {
+	spec.ShowIf = cond
+	return spec
 }
 
 // SourceDocs documents the built-in source types.
@@ -128,19 +139,34 @@ var ElementDocs = []ElementDoc{
 			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
 		}},
-	{Type: "aperture", Label: "孔径光阑", Help: "圆形/矩形/椭圆/环形/多边形/双缝透射孔径，边缘可平滑。",
+	{Type: "aperture", Label: "孔径光阑", Help: "透射孔径：圆孔/方孔/矩孔/椭圆孔/三角孔/环形/多边形/双缝/十字/星形/超椭圆，亦可用顶点列表自定义；切换形状后仅显示该形状对应的参数。",
 		Params: []ParamSpec{
-			cp("shape", "形状", []string{"circle", "rectangle", "ellipse", "ring", "polygon", "double_slit"}, "circle", ""),
-			fp("radius", "半径", "m", 1e-6, 0.05, 1e-4, 1e-3, "circle/polygon"),
-			fp("width", "宽度", "m", 1e-6, 0.05, 1e-4, 2e-3, "rectangle/double_slit：沿 u 方向"),
-			fp("height", "高度", "m", 1e-6, 0.05, 1e-4, 2e-3, "rectangle/double_slit：沿 v 方向"),
-			fp("a", "半轴 a", "m", 1e-6, 0.05, 1e-4, 1e-3, "ellipse"),
-			fp("b", "半轴 b", "m", 1e-6, 0.05, 1e-4, 2e-3, "ellipse"),
-			fp("rin", "内半径", "m", 1e-6, 0.05, 1e-4, 5e-4, "ring"),
-			fp("rout", "外半径", "m", 1e-6, 0.05, 1e-4, 1e-3, "ring"),
-			fp("separation", "缝间距", "m", 1e-6, 0.05, 1e-4, 1e-3, "double_slit：中心到中心"),
-			ip("sides", "边数", "", 3, 32, 6, "polygon"),
-			fp("rotation", "旋转角", "rad", -3.1416, 3.1416, 0.01, 0, ""),
+			cp("shape", "形状", []string{"circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "custom"}, "circle", "选择孔径形状；不同形状显示不同的参数"),
+			// 圆孔 / 三角孔 / 多边形 / 星形共用外接圆半径
+			showIf(fp("radius", "半径", "m", 1e-6, 0.05, 1e-4, 1e-3, "circle/triangle/polygon/star：外接圆半径"), "shape=circle|triangle|polygon|star"),
+			// 方孔 / 矩孔 / 双缝 / 十字共用宽度
+			showIf(fp("width", "宽度", "m", 1e-6, 0.05, 1e-4, 2e-3, "square=边长；rectangle/double_slit/cross=沿 u 方向的宽度"), "shape=square|rectangle|double_slit|cross"),
+			showIf(fp("height", "高度", "m", 1e-6, 0.05, 1e-4, 2e-3, "rectangle/double_slit：沿 v 方向"), "shape=rectangle|double_slit"),
+			// 椭圆 / 超椭圆共用半轴
+			showIf(fp("a", "半轴 a", "m", 1e-6, 0.05, 1e-4, 1e-3, "ellipse/superellipse：沿 u 方向半轴"), "shape=ellipse|superellipse"),
+			showIf(fp("b", "半轴 b", "m", 1e-6, 0.05, 1e-4, 2e-3, "ellipse/superellipse：沿 v 方向半轴"), "shape=ellipse|superellipse"),
+			showIf(fp("order", "幂次 m", "", 0.2, 10, 0.1, 2, "superellipse：(|u|/a)^m+(|v|/b)^m<=1；m=2 为椭圆，m 增大趋近矩形"), "shape=superellipse"),
+			// 环形
+			showIf(fp("rin", "内半径", "m", 1e-6, 0.05, 1e-4, 5e-4, "ring"), "shape=ring"),
+			showIf(fp("rout", "外半径", "m", 1e-6, 0.05, 1e-4, 1e-3, "ring"), "shape=ring"),
+			// 双缝
+			showIf(fp("separation", "缝间距", "m", 1e-6, 0.05, 1e-4, 1e-3, "double_slit：中心到中心"), "shape=double_slit"),
+			// 多边形
+			showIf(ip("sides", "边数", "", 3, 32, 6, "polygon：正多边形边数"), "shape=polygon"),
+			// 十字
+			showIf(fp("length", "臂长", "m", 1e-6, 0.05, 1e-4, 4e-3, "cross：十字臂全长（两臂端到端）"), "shape=cross"),
+			// 星形
+			showIf(fp("inner", "内半径", "m", 1e-6, 0.05, 1e-4, 5e-4, "star：尖角谷底到中心距离（须 < 半径）"), "shape=star"),
+			showIf(ip("points", "尖角数", "", 3, 32, 5, "star：星形尖角数量"), "shape=star"),
+			// 自定义多边形
+			showIf(tp("vertices", "顶点列表", "1e-3,0;0,1e-3;-1e-3,0;0,-1e-3", "custom：分号分隔的 x,y 顶点（至少 3 个，自动闭合）"), "shape=custom"),
+			// 公共参数
+			fp("rotation", "旋转角", "rad", -3.1416, 3.1416, 0.01, 0, "绕中心旋转整个孔径"),
 			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("edge_sigma", "边缘平滑", "m", 0, 1e-3, 1e-6, 0, "0=理想硬边；>0 用误差函数软化边缘以抑制混叠"),

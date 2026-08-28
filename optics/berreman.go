@@ -44,25 +44,33 @@ func anisoMode(eps [3][3]complex128, xi, eta, k0, z float64, Ex, Ey complex128) 
 	var qs [2]complex128
 	var vs [2][4]complex128
 	cnt := 0
-	for _, q := range roots {
+	used := [4]bool{}
+	for i, q := range roots {
 		if forwardMode(q) && cnt < 2 {
 			qs[cnt] = q
 			vs[cnt] = nullVector4(D, q)
+			used[i] = true
 			cnt++
 		}
 	}
 	if cnt < 2 {
-		// Defensive fallback: pick the two roots with the largest real part.
+		// Defensive fallback: pick the remaining roots with the largest real
+		// part. Roots already selected as forward modes are skipped so the two
+		// eigenvectors stay distinct (a duplicate would make the 2x2 solve
+		// singular and produce NaN).
 		for cnt < 2 {
-			best, bi := -1e300, 0
+			best, bi := -1e300, -1
 			for i := range roots {
-				if real(roots[i]) > best {
+				if !used[i] && real(roots[i]) > best {
 					best, bi = real(roots[i]), i
 				}
 			}
+			if bi < 0 {
+				break
+			}
 			qs[cnt] = roots[bi]
 			vs[cnt] = nullVector4(D, roots[bi])
-			roots[bi] = complex(-1e300, -1e300)
+			used[bi] = true
 			cnt++
 		}
 	}

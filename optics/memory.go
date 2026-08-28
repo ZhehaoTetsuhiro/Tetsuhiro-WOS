@@ -75,7 +75,7 @@ func CheckGridMemory(n int) error {
 	peak := estimatePeakBytes(n)
 	budget := memoryBudgetBytes()
 	if peak > budget {
-		return fmt.Errorf("网格 %d×%d 内存预计需要 %s，实际只有 %s，请减小网格边长", n, n, humanBytes(peak), humanBytes(budget))
+		return fmt.Errorf("grid %d×%d would need %s of memory but only %s is available; reduce the grid size", n, n, humanBytes(peak), humanBytes(budget))
 	}
 	return nil
 }

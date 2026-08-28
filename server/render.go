@@ -205,19 +205,44 @@ func infernoAt(t float64) color.RGBA {
 	return infernoLUT[int(t*255)]
 }
 
+// quantumChartDims returns the sanitized photon-number range (base) and mode
+// count used to lay out the quantum charts. It clamps a nil or malformed
+// QuantumResult so the renderers cannot panic (indexing short slices / a
+// missing joint entry) or exhaust memory (an absurd Cutoff).
+func quantumChartDims(res *optics.QuantumResult) (base, modes int) {
+	if res == nil {
+		return 1, 0
+	}
+	base = res.Cutoff + 1
+	if base < 1 {
+		base = 1
+	}
+	if base > 256 { // far beyond MaxQuantumCutoff; only reachable via library misuse
+		base = 256
+	}
+	modes = res.Modes
+	if modes < 0 {
+		modes = 0
+	}
+	if modes > len(res.Dist) {
+		modes = len(res.Dist)
+	}
+	return base, modes
+}
+
 // renderQuantumChart rasterizes a quantum result: the per-mode photon-number
 // distributions (bar charts, one band per mode) stacked above the first joint
 // distribution heatmap (log scale). No text labels (stdlib has no font); the
 // layout is documented in docs/QUANTUM.md.
 func renderQuantumChart(res *optics.QuantumResult) *image.RGBA {
-	base := res.Cutoff + 1
+	base, modes := quantumChartDims(res)
 	const barW = 8
 	const bandH = 72
 	const cell = 10
 	const pad = 6
 	distW := base * barW
 	jointSize := 0
-	if res.Modes >= 2 {
+	if modes >= 2 {
 		jointSize = base * cell
 	}
 	width := distW
@@ -227,14 +252,18 @@ func renderQuantumChart(res *optics.QuantumResult) *image.RGBA {
 	if width < 64 {
 		width = 64
 	}
-	height := res.Modes*bandH + jointSize + pad
+	height := modes*bandH + jointSize + pad
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{10, 13, 18, 255}), image.Point{}, draw.Src)
 
 	// Photon-number distribution bar charts (linear, self-normalized per mode).
 	innerH := bandH - 4
-	for m := 0; m < res.Modes; m++ {
+	for m := 0; m < modes; m++ {
 		dist := res.Dist[m]
+		nlim := base
+		if nlim > len(dist) {
+			nlim = len(dist)
+		}
 		mx := 0.0
 		for _, p := range dist {
 			if p > mx {
@@ -242,7 +271,7 @@ func renderQuantumChart(res *optics.QuantumResult) *image.RGBA {
 			}
 		}
 		y0 := m * bandH
-		for n := 0; n < base; n++ {
+		for n := 0; n < nlim; n++ {
 			t := 0.0
 			if mx > 0 {
 				t = dist[n] / mx
@@ -262,27 +291,29 @@ func renderQuantumChart(res *optics.QuantumResult) *image.RGBA {
 	}
 
 	// Joint distribution heatmap (log scale) for the first mode pair.
-	if res.Modes >= 2 {
+	if modes >= 2 {
 		flat := res.Joint["0,1"]
-		mx := 0.0
-		for _, v := range flat {
-			if v > mx {
-				mx = v
-			}
-		}
-		yOff := res.Modes*bandH + pad
-		const dyn = 1e4
-		for b := 0; b < base; b++ {
-			for a := 0; a < base; a++ {
-				v := flat[a*base+b]
-				t := 0.0
-				if mx > 0 {
-					vp := v / mx
-					t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+		if len(flat) >= base*base {
+			mx := 0.0
+			for _, v := range flat {
+				if v > mx {
+					mx = v
 				}
-				for y := 0; y < cell; y++ {
-					for x := 0; x < cell; x++ {
-						img.Set(a*cell+x, yOff+b*cell+y, infernoAt(t))
+			}
+			yOff := modes*bandH + pad
+			const dyn = 1e4
+			for b := 0; b < base; b++ {
+				for a := 0; a < base; a++ {
+					v := flat[a*base+b]
+					t := 0.0
+					if mx > 0 {
+						vp := v / mx
+						t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+					}
+					for y := 0; y < cell; y++ {
+						for x := 0; x < cell; x++ {
+							img.Set(a*cell+x, yOff+b*cell+y, infernoAt(t))
+						}
 					}
 				}
 			}
@@ -310,14 +341,14 @@ func svgHex(c color.RGBA) string {
 // bars for the photon distributions + a heatmap grid for the joint
 // distribution). Layout mirrors renderQuantumChart.
 func renderQuantumSVG(res *optics.QuantumResult) string {
-	base := res.Cutoff + 1
+	base, modes := quantumChartDims(res)
 	const barW = 8
 	const bandH = 72
 	const cell = 10
 	const pad = 6
 	distW := base * barW
 	jointSize := 0
-	if res.Modes >= 2 {
+	if modes >= 2 {
 		jointSize = base * cell
 	}
 	width := distW
@@ -327,14 +358,18 @@ func renderQuantumSVG(res *optics.QuantumResult) string {
 	if width < 64 {
 		width = 64
 	}
-	height := res.Modes*bandH + jointSize + pad
+	height := modes*bandH + jointSize + pad
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`, width, height, width, height)
 	sb.WriteString(`<rect width="100%" height="100%" fill="#0a0d12"/>`)
 
 	innerH := bandH - 4
-	for m := 0; m < res.Modes; m++ {
+	for m := 0; m < modes; m++ {
 		dist := res.Dist[m]
+		nlim := base
+		if nlim > len(dist) {
+			nlim = len(dist)
+		}
 		mx := 0.0
 		for _, p := range dist {
 			if p > mx {
@@ -342,7 +377,7 @@ func renderQuantumSVG(res *optics.QuantumResult) string {
 			}
 		}
 		y0 := m * bandH
-		for n := 0; n < base; n++ {
+		for n := 0; n < nlim; n++ {
 			t := 0.0
 			if mx > 0 {
 				t = dist[n] / mx
@@ -357,25 +392,27 @@ func renderQuantumSVG(res *optics.QuantumResult) string {
 		}
 	}
 
-	if res.Modes >= 2 {
+	if modes >= 2 {
 		flat := res.Joint["0,1"]
-		mx := 0.0
-		for _, v := range flat {
-			if v > mx {
-				mx = v
-			}
-		}
-		yOff := res.Modes*bandH + pad
-		const dyn = 1e4
-		for b := 0; b < base; b++ {
-			for a := 0; a < base; a++ {
-				v := flat[a*base+b]
-				t := 0.0
-				if mx > 0 {
-					vp := v / mx
-					t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+		if len(flat) >= base*base {
+			mx := 0.0
+			for _, v := range flat {
+				if v > mx {
+					mx = v
 				}
-				fmt.Fprintf(&sb, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, a*cell, yOff+b*cell, cell, cell, svgHex(infernoAt(t)))
+			}
+			yOff := modes*bandH + pad
+			const dyn = 1e4
+			for b := 0; b < base; b++ {
+				for a := 0; a < base; a++ {
+					v := flat[a*base+b]
+					t := 0.0
+					if mx > 0 {
+						vp := v / mx
+						t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
+					}
+					fmt.Fprintf(&sb, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`, a*cell, yOff+b*cell, cell, cell, svgHex(infernoAt(t)))
+				}
 			}
 		}
 	}

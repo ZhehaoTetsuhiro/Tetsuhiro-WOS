@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
+	"strings"
+	"sync"
 )
 
 // ElementSpec is the JSON-serializable description of one optical element.
@@ -188,13 +191,20 @@ type apertureEl struct {
 	height     float64
 	a          float64
 	b          float64
+	order      float64
 	rin        float64
 	rout       float64
 	sides      int
+	points     int
+	inner      float64
+	length     float64
 	rotation   float64
 	separation float64
 	x0, y0     float64
 	edgeSigma  float64
+
+	// verts holds precomputed polygon vertices for triangle/polygon/star/custom.
+	verts [][2]float64
 }
 
 func newAperture(p map[string]any) (Element, error) {
@@ -205,9 +215,13 @@ func newAperture(p map[string]any) (Element, error) {
 		height:     pfd(p, "height", 0.002),
 		a:          pfd(p, "a", 0.001),
 		b:          pfd(p, "b", 0.002),
+		order:      pfd(p, "order", 2),
 		rin:        pfd(p, "rin", 0.0005),
 		rout:       pfd(p, "rout", 0.001),
 		sides:      pi_(p, "sides", 6),
+		points:     pi_(p, "points", 5),
+		inner:      pfd(p, "inner", 0.0005),
+		length:     pfd(p, "length", 0.004),
 		rotation:   pfd(p, "rotation", 0),
 		separation: pfd(p, "separation", 0.001),
 		x0:         pfd(p, "x", 0),
@@ -215,9 +229,70 @@ func newAperture(p map[string]any) (Element, error) {
 		edgeSigma:  pfd(p, "edge_sigma", 0),
 	}
 	switch e.shape {
-	case "circle", "rectangle", "ellipse", "ring", "polygon", "double_slit":
+	case "circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "custom":
 	default:
 		return nil, fmt.Errorf("aperture: unknown shape %q", e.shape)
+	}
+	switch e.shape {
+	case "circle":
+		if e.radius <= 0 {
+			return nil, fmt.Errorf("aperture: circle radius must be > 0")
+		}
+	case "square":
+		if e.width <= 0 {
+			return nil, fmt.Errorf("aperture: square width must be > 0")
+		}
+	case "rectangle":
+		if e.width <= 0 || e.height <= 0 {
+			return nil, fmt.Errorf("aperture: rectangle width and height must be > 0")
+		}
+	case "ellipse":
+		if e.a <= 0 || e.b <= 0 {
+			return nil, fmt.Errorf("aperture: ellipse a and b must be > 0")
+		}
+	case "superellipse":
+		if e.a <= 0 || e.b <= 0 || e.order < 0.1 {
+			return nil, fmt.Errorf("aperture: superellipse a,b > 0 and order >= 0.1")
+		}
+	case "triangle":
+		if e.radius <= 0 {
+			return nil, fmt.Errorf("aperture: triangle radius must be > 0")
+		}
+		e.verts = regularPolygonVertices(3, e.radius, math.Pi/2)
+	case "ring":
+		if e.rout <= 0 || e.rin < 0 || e.rin >= e.rout {
+			return nil, fmt.Errorf("aperture: ring requires 0 <= rin < rout")
+		}
+	case "polygon":
+		if e.radius <= 0 {
+			return nil, fmt.Errorf("aperture: polygon radius must be > 0")
+		}
+		if e.sides < 3 {
+			return nil, fmt.Errorf("aperture: polygon sides must be >= 3")
+		}
+		e.verts = regularPolygonVertices(e.sides, e.radius, math.Pi/float64(e.sides))
+	case "double_slit":
+		if e.width <= 0 || e.height <= 0 || e.separation <= 0 {
+			return nil, fmt.Errorf("aperture: double_slit width/height/separation must be > 0")
+		}
+	case "cross":
+		if e.width <= 0 || e.length <= 0 {
+			return nil, fmt.Errorf("aperture: cross width and length must be > 0")
+		}
+	case "star":
+		if e.radius <= 0 || e.inner <= 0 || e.inner >= e.radius {
+			return nil, fmt.Errorf("aperture: star requires 0 < inner < radius")
+		}
+		if e.points < 3 {
+			return nil, fmt.Errorf("aperture: star points must be >= 3")
+		}
+		e.verts = starVertices(e.points, e.radius, e.inner, math.Pi/2)
+	case "custom":
+		vs, err := parseVertices(ps(p, "vertices", ""))
+		if err != nil {
+			return nil, err
+		}
+		e.verts = vs
 	}
 	return e, nil
 }
@@ -233,61 +308,38 @@ func (e *apertureEl) Apply(f *Field, ctx *Context) error {
 			dx := f.X(i) - e.x0
 			u := cr*dx + sr*dy
 			v := -sr*dx + cr*dy
-			var t complex128
+			var d float64
 			switch e.shape {
 			case "circle":
-				d := e.radius - math.Hypot(dx, dy)
-				if sig > 0 {
-					t = smoothStep(d, sig)
-				} else {
-					t = step(d)
-				}
+				d = e.radius - math.Hypot(dx, dy)
+			case "square":
+				d = math.Min(e.width/2-math.Abs(u), e.width/2-math.Abs(v))
 			case "rectangle":
-				d := math.Min(e.width/2-math.Abs(u), e.height/2-math.Abs(v))
-				if sig > 0 {
-					t = smoothStep(d, sig)
-				} else {
-					t = step(d)
-				}
+				d = math.Min(e.width/2-math.Abs(u), e.height/2-math.Abs(v))
 			case "ellipse":
-				rn := math.Hypot(u/e.a, v/e.b)
-				d := (1 - rn) * math.Min(e.a, e.b)
-				if sig > 0 {
-					t = smoothStep(d, sig)
-				} else {
-					t = step(d)
-				}
+				d = (1 - math.Hypot(u/e.a, v/e.b)) * math.Min(e.a, e.b)
+			case "triangle", "polygon", "star", "custom":
+				d = polygonSignedDistance(e.verts, u, v)
 			case "ring":
 				r := math.Hypot(dx, dy)
-				d := math.Min(r-e.rin, e.rout-r)
-				if sig > 0 {
-					t = smoothStep(d, sig)
-				} else {
-					t = step(d)
-				}
-			case "polygon":
-				// Regular polygon inscribed in a circle of radius e.radius.
-				th := math.Atan2(v, u)
-				sec := 2 * math.Pi / float64(e.sides)
-				thm := math.Mod(th, sec)
-				if thm > sec/2 {
-					thm = sec - thm
-				}
-				rMax := e.radius * math.Cos(math.Pi/float64(e.sides)) / math.Cos(thm)
-				t = step(rMax - math.Hypot(u, v))
+				d = math.Min(r-e.rin, e.rout-r)
 			case "double_slit":
-				// Two parallel slits: width along u, height along v,
-				// separated by e.separation (center-to-center).
-				d := math.Min(e.height/2-math.Abs(v), e.width/2-math.Abs(u-e.separation/2))
+				d1 := math.Min(e.height/2-math.Abs(v), e.width/2-math.Abs(u-e.separation/2))
 				d2 := math.Min(e.height/2-math.Abs(v), e.width/2-math.Abs(u+e.separation/2))
-				if d2 > d {
-					d = d2
-				}
-				if sig > 0 {
-					t = smoothStep(d, sig)
-				} else {
-					t = step(d)
-				}
+				d = math.Max(d1, d2)
+			case "cross":
+				hw := e.width / 2
+				hl := e.length / 2
+				d = math.Max(math.Min(hw-math.Abs(u), hl-math.Abs(v)), math.Min(hl-math.Abs(u), hw-math.Abs(v)))
+			case "superellipse":
+				rn := math.Pow(math.Abs(u)/e.a, e.order) + math.Pow(math.Abs(v)/e.b, e.order)
+				d = (1 - rn) * math.Min(e.a, e.b)
+			}
+			var t complex128
+			if sig > 0 {
+				t = smoothStep(d, sig)
+			} else {
+				t = step(d)
 			}
 			idx := j*n + i
 			f.Ex[idx] *= t
@@ -297,6 +349,119 @@ func (e *apertureEl) Apply(f *Field, ctx *Context) error {
 		}
 	}
 	return nil
+}
+
+// ---- polygon geometry helpers ----------------------------------------------
+
+// regularPolygonVertices returns n vertices of a regular polygon inscribed in
+// a circle of the given radius, with the first vertex at angle phi0.
+func regularPolygonVertices(n int, radius, phi0 float64) [][2]float64 {
+	out := make([][2]float64, n)
+	for i := 0; i < n; i++ {
+		a := phi0 + 2*math.Pi*float64(i)/float64(n)
+		out[i] = [2]float64{radius * math.Cos(a), radius * math.Sin(a)}
+	}
+	return out
+}
+
+// starVertices returns the 2n vertices of a regular star polygon alternating
+// between outer radius and inner radius (a classic pointed star).
+func starVertices(n int, outerR, innerR, phi0 float64) [][2]float64 {
+	out := make([][2]float64, 2*n)
+	for i := 0; i < 2*n; i++ {
+		a := phi0 + math.Pi*float64(i)/float64(n)
+		r := outerR
+		if i%2 == 1 {
+			r = innerR
+		}
+		out[i] = [2]float64{r * math.Cos(a), r * math.Sin(a)}
+	}
+	return out
+}
+
+// pointInPolygon reports whether (x,y) lies inside the closed polygon using
+// the ray-casting test (handles concave and star-shaped polygons).
+func pointInPolygon(pts [][2]float64, x, y float64) bool {
+	n := len(pts)
+	if n < 3 {
+		return false
+	}
+	inside := false
+	j := n - 1
+	for i := 0; i < n; i++ {
+		xi, yi := pts[i][0], pts[i][1]
+		xj, yj := pts[j][0], pts[j][1]
+		if (yi > y) != (yj > y) {
+			xint := (xj-xi)*(y-yi)/(yj-yi) + xi
+			if x < xint {
+				inside = !inside
+			}
+		}
+		j = i
+	}
+	return inside
+}
+
+// distToSegment returns the Euclidean distance from (px,py) to segment ab.
+func distToSegment(px, py, ax, ay, bx, by float64) float64 {
+	abx, aby := bx-ax, by-ay
+	apx, apy := px-ax, py-ay
+	t := (apx*abx + apy*aby) / (abx*abx + aby*aby)
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	return math.Hypot(px-(ax+t*abx), py-(ay+t*aby))
+}
+
+// polygonSignedDistance returns the signed distance to a polygon boundary:
+// positive inside, negative outside (0 on the boundary).
+func polygonSignedDistance(pts [][2]float64, x, y float64) float64 {
+	n := len(pts)
+	if n < 3 {
+		return -1e300
+	}
+	d := math.Inf(1)
+	for i := 0; i < n; i++ {
+		a, b := pts[i], pts[(i+1)%n]
+		if dd := distToSegment(x, y, a[0], a[1], b[0], b[1]); dd < d {
+			d = dd
+		}
+	}
+	if !pointInPolygon(pts, x, y) {
+		d = -d
+	}
+	return d
+}
+
+// parseVertices parses a "x,y;x,y;..." string into polygon vertices.
+func parseVertices(s string) ([][2]float64, error) {
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ';' || r == '\n' || r == '\r'
+	})
+	out := make([][2]float64, 0, len(fields))
+	for _, fld := range fields {
+		nums := strings.FieldsFunc(fld, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t'
+		})
+		if len(nums) == 0 {
+			continue
+		}
+		if len(nums) != 2 {
+			return nil, fmt.Errorf("aperture: custom vertex %q must be x,y", fld)
+		}
+		x, err1 := strconv.ParseFloat(strings.TrimSpace(nums[0]), 64)
+		y, err2 := strconv.ParseFloat(strings.TrimSpace(nums[1]), 64)
+		if err1 != nil || err2 != nil {
+			return nil, fmt.Errorf("aperture: invalid custom vertex %q", fld)
+		}
+		out = append(out, [2]float64{x, y})
+	}
+	if len(out) < 3 {
+		return nil, fmt.Errorf("aperture: custom shape needs at least 3 vertices")
+	}
+	return out, nil
 }
 
 // ---- apodizer --------------------------------------------------------------
@@ -350,6 +515,9 @@ func newGrating(p map[string]any) (Element, error) {
 	}
 	if e.period <= 0 {
 		return nil, fmt.Errorf("grating: period must be > 0")
+	}
+	if e.duty < 0 || e.duty > 1 {
+		return nil, fmt.Errorf("grating: duty must be in [0,1]")
 	}
 	switch e.kind {
 	case "amplitude_sin", "amplitude_binary", "phase_sin", "phase_binary", "blazed":
@@ -506,6 +674,9 @@ func newZonePlate(p map[string]any) (Element, error) {
 	e := &zonePlateEl{focal: pfd(p, "f", 0.1), radius: pfd(p, "radius", 0.01), kind: ps(p, "kind", "phase")}
 	if e.focal <= 0 {
 		return nil, fmt.Errorf("zone_plate: f must be > 0")
+	}
+	if e.kind != "phase" && e.kind != "amplitude" {
+		return nil, fmt.Errorf("zone_plate: unknown kind %q", e.kind)
 	}
 	return e, nil
 }
@@ -774,13 +945,31 @@ func radialZernike(n, m int, rho float64) float64 {
 	return s
 }
 
-var factCache = []float64{1, 1}
+var (
+	factCache = []float64{1, 1}
+	factOnce  sync.Once
+)
 
+// maxFactorial is well beyond any factorial used in this package (Zernike
+// radial polynomials use n<=5; the loss channel uses n<=cutoff<=20); 170! is
+// the largest value comfortably representable in float64.
+const maxFactorial = 170
+
+// factorial returns n!. The table is built once, thread-safely, so concurrent
+// Simulate/SimulateQuantum calls cannot race on the shared cache slice.
 func factorial(n int) float64 {
-	for len(factCache) <= n {
-		factCache = append(factCache, factCache[len(factCache)-1]*float64(len(factCache)))
+	if n < 0 {
+		return math.NaN()
 	}
-	return factCache[n]
+	factOnce.Do(func() {
+		for i := len(factCache); i <= maxFactorial; i++ {
+			factCache = append(factCache, factCache[i-1]*float64(i))
+		}
+	})
+	if n < len(factCache) {
+		return factCache[n]
+	}
+	return math.Inf(1)
 }
 
 func (e *zernikeEl) Apply(f *Field, ctx *Context) error {

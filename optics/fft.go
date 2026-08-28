@@ -147,9 +147,7 @@ func fft1DAny(a []complex128, inverse bool) {
 func fft1DBluestein(a []complex128, inverse bool) {
 	n := len(a)
 	if n <= 1 {
-		if inverse {
-			a[0] /= complex(float64(n), 0)
-		}
+		// n==0 is an empty slice (nothing to do); n==1 needs no scaling (1/N=1).
 		return
 	}
 	m := 1

@@ -174,9 +174,15 @@ func BuildSource(spec SourceSpec, size int, width float64, polarized bool, wl fl
 			f.Ex[i] = ex * jx
 			f.Ey[i] = ex * jy
 		}
-	} else if jx != 1 || jy != 0 {
-		for i := range f.Ex {
-			f.Ex[i] *= jx
+	} else {
+		// Scalar (unpolarized) simulation keeps only the total power of the
+		// requested Jones vector, so a y/circular/... polarization does not
+		// zero the field (the polarization state itself is discarded).
+		mag := math.Hypot(math.Hypot(real(jx), imag(jx)), math.Hypot(real(jy), imag(jy)))
+		if mag != 0 {
+			for i := range f.Ex {
+				f.Ex[i] *= complex(mag, 0)
+			}
 		}
 	}
 

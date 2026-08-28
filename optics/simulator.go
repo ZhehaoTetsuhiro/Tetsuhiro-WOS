@@ -184,7 +184,10 @@ func (t *trainer) runTrain(elements []ElementSpec, f *Field, armID string, depth
 			if err != nil || dist < 0 {
 				return fmt.Errorf("element %d: propagate distance must be >= 0", k)
 			}
-			method, _ := ParseMethod(ps(spec.Params, "method", t.cfg.Method))
+			method, err := ParseMethod(ps(spec.Params, "method", t.cfg.Method))
+			if err != nil {
+				return fmt.Errorf("element %d: %v", k, err)
+			}
 			// The distance is always the path length along the beam's own
 			// direction of travel. After a mirror the beam folds back, but the
 			// field still advances by +ik*s per traveled meter: a round trip

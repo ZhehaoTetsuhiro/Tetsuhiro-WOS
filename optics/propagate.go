@@ -413,44 +413,74 @@ func propFresnelTF(f *Field, z float64, ctx *Context) {
 	}
 }
 
-// propFresnelIR: U2 = exp(i k z)/(i lambda z) * h * F^-1{ F{U} * F{h} },
-// h = exp(i pi r^2/(lambda z)).
+// propFresnelIR: U2 = (e^{i k z}/(i lambda z)) * integral of U(x1) h(x2-x1)
+// dx1, h = exp(i pi r^2/(lambda z)). The integral is a convolution, evaluated
+// as a Riemann sum (dx^2 area element) with the FFT convolution theorem on a
+// zero-padded 2N x 2N grid. Padding is required for correctness, not only
+// accuracy: on the bare N-grid the kernel's wrap at |offset| = N/2/2 folds the
+// chirp phase (its winding in k reverses), and for output pixels near the
+// window edge that spurious stationary point sits on the field center,
+// producing a coherent wrap-around artifact orders of magnitude above the
+// physical tail. With the field centered in the 2N window no in-support pair
+// wraps and the circular convolution equals the linear one exactly. The output
+// quadratic phase of the Fraunhofer formula is NOT applied here: the
+// convolution with h already carries it.
 func propFresnelIR(f *Field, z float64, ctx *Context) {
 	wl := ctx.Wavelength
 	k := 2 * math.Pi / wl
 	n := f.N
-	// Impulse response on the same grid.
-	h := make([]complex128, n*n)
-	for j := 0; j < n; j++ {
-		y := f.Y(j)
-		for i := 0; i < n; i++ {
-			x := f.X(i)
-			h[j*n+i] = cexpI(math.Pi * (x*x + y*y) / (wl * z))
+	m := 2 * n
+	dx := f.DX
+	// Impulse response on the padded grid, in the FFT wrap-around layout: the
+	// kernel index 0 must correspond to zero offset for the circular
+	// convolution theorem, so pixel p<m/2 maps to offset +p*dx and p>=m/2 to
+	// (p-m)*dx (the chirp is even, so the p=m/2 boundary choice is moot).
+	h := make([]complex128, m*m)
+	for j := 0; j < m; j++ {
+		dy := float64(j)
+		if j > m/2 {
+			dy -= float64(m)
+		}
+		y := dy * dx
+		for i := 0; i < m; i++ {
+			dxi := float64(i)
+			if i > m/2 {
+				dxi -= float64(m)
+			}
+			x := dxi * dx
+			h[j*m+i] = cexpI(math.Pi * (x*x + y*y) / (wl * z))
 		}
 	}
-	fft2D(h, n, false)
-	pre := complex(0, -1/(wl*z)) * cexpI(k*z)
+	fft2D(h, m, false)
+	pre := complex(0, -1/(wl*z)) * cexpI(k*z) * complex(dx*dx, 0)
+	buf := make([]complex128, m*m)
+	off := n / 2
 	apply := func(a []complex128) {
-		fft2D(a, n, false)
-		for i := range a {
-			a[i] *= h[i]
+		for i := range buf {
+			buf[i] = 0
 		}
-		fft2D(a, n, true)
 		for j := 0; j < n; j++ {
-			y := f.Y(j)
-			for i := 0; i < n; i++ {
-				x := f.X(i)
-				a[j*n+i] *= pre * cexpI(math.Pi*(x*x+y*y)/(wl*z))
-			}
+			copy(buf[(j+off)*m+off:(j+off)*m+off+n], a[j*n:(j+1)*n])
+		}
+		fft2D(buf, m, false)
+		for i := range buf {
+			buf[i] *= h[i]
+		}
+		fft2D(buf, m, true)
+		for i := range buf {
+			buf[i] *= pre
+		}
+		for j := 0; j < n; j++ {
+			copy(a[j*n:(j+1)*n], buf[(j+off)*m+off:(j+off)*m+off+n])
 		}
 	}
 	apply(f.Ex)
 	if f.Polarized {
 		apply(f.Ey)
 	}
-	if math.Abs(z) < float64(n)*f.DX*f.DX/wl {
+	if math.Abs(z) < float64(n)*dx*dx/wl {
 		ctx.Warnings.Add("fresnel_ir_alias",
-			fmt.Sprintf("Fresnel 冲激响应法在 |z|=%g m 小于 N*dx^2/lambda=%g m，存在混叠；请改用角谱法或 Fresnel 传递函数法", math.Abs(z), float64(n)*f.DX*f.DX/wl), 0)
+			fmt.Sprintf("Fresnel 冲激响应法在 |z|=%g m 小于 N*dx^2/lambda=%g m，存在混叠；请改用角谱法或 Fresnel 传递函数法", math.Abs(z), float64(n)*dx*dx/wl), 0)
 	}
 }
 

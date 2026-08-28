@@ -213,8 +213,8 @@ func (d *DensityMatrix) BeamSplitter(m0, m1 int, reflectivity float64) error {
 }
 
 // Loss applies a lossy channel with transmittance T in [0,1] on one mode via
-// the amplitude-damping Kraus operators E_l = sqrt((1-T)^l/l!) T^{n/2} a^l,
-// rho -> sum_l E_l rho E_l†.
+// the amplitude-damping Kraus operators
+// E_l = sqrt((1-T)^l/l!) T^{(n-l)/2} a^l, rho -> sum_l E_l rho E_l†.
 func (d *DensityMatrix) Loss(mode int, T float64) error {
 	if err := d.checkMode(mode); err != nil {
 		return err

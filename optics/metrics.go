@@ -34,7 +34,6 @@ func ComputeStats(f *Field, wl, strehlAperture, strehlDistance float64) PlaneSta
 	var p, px, py float64
 	s.IntensityMin = math.Inf(1)
 	phMin, phMax := math.Inf(1), math.Inf(-1)
-	peakIdx := 0
 	peak := -1.0
 	for j := 0; j < n; j++ {
 		y := f.Y(j)
@@ -52,7 +51,6 @@ func ComputeStats(f *Field, wl, strehlAperture, strehlDistance float64) PlaneSta
 			}
 			if w > peak {
 				peak = w
-				peakIdx = idx
 			}
 			ph := math.Atan2(imag(f.Ex[idx]), real(f.Ex[idx]))
 			if ph < phMin {
@@ -90,7 +88,6 @@ func ComputeStats(f *Field, wl, strehlAperture, strehlDistance float64) PlaneSta
 			s.Strehl = s.Peak / ideal
 		}
 	}
-	_ = peakIdx
 	return s
 }
 

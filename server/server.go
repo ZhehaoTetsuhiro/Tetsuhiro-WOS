@@ -17,6 +17,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,17 @@ const (
 	StatusRunning = "running"
 	StatusDone    = "done"
 	StatusError   = "error"
+)
+
+// Limits that keep the server bounded under load or adversarial input.
+const (
+	// maxQueuedRuns bounds how many simulations may be queued/running at once,
+	// preventing a submit flood from spawning unbounded goroutines.
+	maxQueuedRuns = 8
+	// maxStoredRuns bounds the number of retained runs (finished or errored) so
+	// s.runs/s.order cannot grow without bound when maxBytes is generous or
+	// when many runs error.
+	maxStoredRuns = 128
 )
 
 // runEntry is one submitted simulation.
@@ -111,14 +123,14 @@ func (s *Server) Handler() http.Handler {
 			writeErr(w, http.StatusMethodNotAllowed, "POST only")
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "读取请求体失败: "+err.Error())
+			writeErr(w, http.StatusBadRequest, "failed to read request body: "+err.Error())
 			return
 		}
 		var cfg optics.QuantumConfig
 		if err := json.Unmarshal(body, &cfg); err != nil {
-			writeErr(w, http.StatusBadRequest, "JSON 解析失败: "+err.Error())
+			writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
 		res, err := optics.SimulateQuantum(cfg)
@@ -155,14 +167,18 @@ func (s *Server) Handler() http.Handler {
 		issues := optics.ValidateConfig(cfg)
 		if len(issues) > 0 {
 			first := issues[0]
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf("配置校验失败：%s: %s", first.Path, first.Message))
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("config validation failed: %s: %s", first.Path, first.Message))
 			return
 		}
 		if err := optics.CheckGridMemory(cfg.Grid.Size); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		id := s.submit(cfg)
+		id, err := s.submit(cfg)
+		if err != nil {
+			writeErr(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": id, "status": StatusRunning})
 	})
 	mux.HandleFunc("/api/runs/", func(w http.ResponseWriter, r *http.Request) {
@@ -177,16 +193,16 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		id := parts[0]
-		e := s.get(id)
-		if e == nil {
+		snap, ok := s.snapshot(id)
+		if !ok {
 			writeErr(w, http.StatusNotFound, "unknown run id")
 			return
 		}
 		if len(parts) == 1 {
-			s.writeRunMeta(w, id, e)
+			s.writeRunMeta(w, id, snap)
 			return
 		}
-		if e.status != StatusDone {
+		if snap.status != StatusDone {
 			writeErr(w, http.StatusConflict, "run not finished")
 			return
 		}
@@ -196,7 +212,7 @@ func (s *Server) Handler() http.Handler {
 				writeErr(w, http.StatusBadRequest, "missing plane id")
 				return
 			}
-			pl := findPlane(e.res, parts[2])
+			pl := findPlane(snap.res, parts[2])
 			if pl == nil {
 				writeErr(w, http.StatusNotFound, "unknown plane id")
 				return
@@ -207,7 +223,7 @@ func (s *Server) Handler() http.Handler {
 				writeErr(w, http.StatusBadRequest, "missing plane id")
 				return
 			}
-			pl := findPlane(e.res, parts[2])
+			pl := findPlane(snap.res, parts[2])
 			if pl == nil {
 				writeErr(w, http.StatusNotFound, "unknown plane id")
 				return
@@ -221,13 +237,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 func decodeConfig(w http.ResponseWriter, r *http.Request) (*optics.Config, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 	if err != nil {
-		return nil, fmt.Errorf("读取请求体失败: %v", err)
+		return nil, fmt.Errorf("failed to read request body: %v", err)
 	}
 	var cfg optics.Config
 	if err := json.Unmarshal(body, &cfg); err != nil {
-		return nil, fmt.Errorf("JSON 解析失败: %v", err)
+		return nil, fmt.Errorf("invalid JSON: %v", err)
 	}
 	return &cfg, nil
 }
@@ -241,52 +257,110 @@ func findPlane(res *optics.Result, id string) *optics.Plane {
 	return nil
 }
 
-// submit registers the run and starts its computation in the background.
-func (s *Server) submit(cfg *optics.Config) string {
+// submit registers the run and starts its computation in the background. It
+// rejects new submissions once the queued+running count reaches maxQueuedRuns,
+// bounding goroutine and store growth under a submit flood.
+func (s *Server) submit(cfg *optics.Config) (string, error) {
 	id := newRunID()
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	running := 0
+	for _, e := range s.runs {
+		if e.status == StatusRunning {
+			running++
+		}
+	}
+	if running >= maxQueuedRuns {
+		return "", fmt.Errorf("too many queued simulations (limit %d); try again later", maxQueuedRuns)
+	}
 	s.runs[id] = &runEntry{status: StatusRunning, created: time.Now()}
 	s.order = append(s.order, id)
-	s.mu.Unlock()
 	go func() {
 		s.simSem <- struct{}{}
-		res, err := optics.Simulate(*cfg)
-		<-s.simSem
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		e := s.runs[id]
-		if e == nil {
-			return
-		}
-		if err != nil {
-			e.status = StatusError
-			e.errMsg = err.Error()
-			return
-		}
-		e.status = StatusDone
-		e.res = res
-		for _, p := range res.Planes {
-			s.bytes += int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
-		}
-		s.evict()
+		defer func() { <-s.simSem }()
+		s.runSimulation(id, cfg)
 	}()
-	return id
+	return id, nil
 }
 
-func (s *Server) get(id string) *runEntry {
+// runSimulation executes one simulation and records its result. It always
+// releases its slot (via the caller's defer) and converts a panic into an
+// error entry so one bad run cannot wedge the server or leave a run stuck.
+func (s *Server) runSimulation(id string, cfg *optics.Config) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.mu.Lock()
+			if e := s.runs[id]; e != nil {
+				e.status = StatusError
+				e.errMsg = fmt.Sprintf("simulation panic: %v", r)
+			}
+			s.evict()
+			s.mu.Unlock()
+		}
+	}()
+	res, err := optics.Simulate(*cfg)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.runs[id]
+	e := s.runs[id]
+	if e == nil {
+		return
+	}
+	if err != nil {
+		e.status = StatusError
+		e.errMsg = err.Error()
+		s.evict()
+		return
+	}
+	e.status = StatusDone
+	e.res = res
+	s.bytes += runBytes(e)
+	s.evict()
 }
 
-// evict drops the oldest finished runs until the memory budget is met.
+// runSnapshot is an immutable copy of a run's mutable fields, safe to read
+// without holding s.mu. res is immutable once a run finishes.
+type runSnapshot struct {
+	status string
+	errMsg string
+	res    *optics.Result
+}
+
+// snapshot returns a consistent view of a run's state under the lock. Reading
+// status/errMsg/res through a snapshot (rather than a raw *runEntry) avoids
+// the data race with the background simulation goroutine that mutates those
+// fields.
+func (s *Server) snapshot(id string) (*runSnapshot, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.runs[id]
+	if !ok {
+		return nil, false
+	}
+	return &runSnapshot{status: e.status, errMsg: e.errMsg, res: e.res}, true
+}
+
+// runBytes returns the approximate bytes retained for a finished run's plane
+// data (16 bytes per complex128 element across Ex/Ey/Ez).
+func runBytes(e *runEntry) int64 {
+	var n int64
+	for _, p := range e.res.Planes {
+		n += int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
+	}
+	return n
+}
+
+// evict drops the oldest terminal (finished or errored) runs until both the
+// memory budget and the maxStoredRuns cap are met. Caller must hold s.mu. At
+// least one run is always kept so the most recent result stays servable; a
+// single run larger than maxBytes therefore remains resident until a newer run
+// lets it be reclaimed.
 func (s *Server) evict() {
-	for s.bytes > s.maxBytes && len(s.order) > 1 {
+	for (s.bytes > s.maxBytes || len(s.runs) > maxStoredRuns) && len(s.order) > 1 {
 		var victim string
 		var victimIdx = -1
 		for i, id := range s.order {
 			e := s.runs[id]
-			if e != nil && e.status == StatusDone {
+			if e != nil && (e.status == StatusDone || e.status == StatusError) {
 				victim, victimIdx = id, i
 				break
 			}
@@ -295,8 +369,8 @@ func (s *Server) evict() {
 			break
 		}
 		e := s.runs[victim]
-		for _, p := range e.res.Planes {
-			s.bytes -= int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
+		if e.status == StatusDone {
+			s.bytes -= runBytes(e)
 		}
 		delete(s.runs, victim)
 		s.order = append(s.order[:victimIdx], s.order[victimIdx+1:]...)
@@ -304,7 +378,7 @@ func (s *Server) evict() {
 }
 
 // writeRunMeta serializes status + result metadata (no field data).
-func (s *Server) writeRunMeta(w http.ResponseWriter, id string, e *runEntry) {
+func (s *Server) writeRunMeta(w http.ResponseWriter, id string, e *runSnapshot) {
 	out := map[string]any{"run_id": id, "status": e.status}
 	if e.status == StatusError {
 		out["error"] = e.errMsg
@@ -442,9 +516,7 @@ func norm2(z complex128) float64 {
 }
 
 func parseFloat(s string) (float64, error) {
-	var v float64
-	_, err := fmt.Sscanf(s, "%g", &v)
-	return v, err
+	return strconv.ParseFloat(strings.TrimSpace(s), 64)
 }
 
 func newRunID() string {
