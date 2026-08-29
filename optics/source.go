@@ -121,6 +121,10 @@ func BuildSource(spec SourceSpec, size int, width float64, polarized bool, wl fl
 			return nil, fmt.Errorf("spherical: radius must be > 0")
 		}
 		k := 2 * math.Pi / wl
+		// Diverging: e^{+i k d}/d from a point at z = -radius. Converging:
+		// e^{-i k d}/d, the phase-conjugate wave, which focuses at
+		// z = +radius. (Multiplying the amplitude by -1 would only add a
+		// constant pi phase and leave the wave diverging.)
 		s := 1.0
 		if conv != 0 {
 			s = -1.0
@@ -130,7 +134,8 @@ func BuildSource(spec SourceSpec, size int, width float64, polarized bool, wl fl
 			for i := 0; i < n; i++ {
 				dx := f.X(i) - x0
 				dist := math.Sqrt(rad*rad + dx*dx + dy*dy)
-				f.Ex[j*n+i] = complex(math.Cos(k*dist)*s/dist, math.Sin(k*dist)*s/dist)
+				ph := k * dist * s
+				f.Ex[j*n+i] = complex(math.Cos(ph)/dist, math.Sin(ph)/dist)
 			}
 		}
 	default:

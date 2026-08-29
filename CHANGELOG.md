@@ -2,6 +2,18 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.3.2] - 2026-08-29
+
+### 修复（传播内核复场级审查）
+
+对传播内核做了一次复场（振幅+相位）级数值审查——将 `asm` / `asm_pad` / `asm_shift` / `asm_shift_pad` / `fresnel_tf` / `fresnel_ir` / `vectorial` / 一维传播与解析解（倾斜平面波、Fresnel–Gaussian 闭式解、夫琅禾费远场闭式解）逐像素对比。标量/矢量 ASM 核心、pad/shift 变体、一维传播与往返逆传播均验证精确（1e-8–1e-16）；审查发现并修复以下缺陷（原有测试均为强度级，无法察觉相位类错误）：
+
+- **夫琅禾费远场（fraunhofer）复场存在奈奎斯特棋盘相位错误**：中心化输入布局下原始 DFT 与采样连续傅里叶变换相差因子 e^{iπ(p+q)}，原实现仅做 fftshift，输出复场逐像素相差 (−1)^{i+j}（相邻像素 π 相位翻转）。强度分布不受影响（现有强度级测试全部通过），但相位、剖面相位图与任何对远场结果的后续相干操作（继续传播、干涉合束）都被破坏。已在 fftshift 前补偿该因子，修复后与高斯远场闭式解的复场相对 L2 误差从 √2 降至 5.8e-16（新增回归测试 `TestFraunhoferComplexFieldExact`）。
+- **fraunhofer_nearfield 告警失效**：菲涅耳数 F = D²/(λ|z|) 在传播完成之后、以过期输入像素尺寸对远场图样计算，实际上从不触发。现改为在传播前测量输入光斑支撑半径 D（与 docs/PHYSICS.md §4.3 定义一致），F > 0.5 时正确告警（新增回归测试 `TestFraunhoferNearfieldWarningMeasuresInput`）。
+- **球面波光源的"会聚"选项产生发散波**：会聚分支仅把振幅乘以 −1（等价于整体加 π 常数相位），并未共轭相位——勾选"会聚"得到的是发散球面波。现改为相位取反 e^{−ikd}/d（发散波 e^{+ikd}/d 的相位共轭），会聚球面波在 z = +radius 处聚焦（新增回归测试 `TestSphericalSourceConvergingPhase` / `TestSphericalSourceConvergingFocuses`）。
+- **泽尼克像差板 m=0 模式缺少 Noll 归一化**：m≠0 模式带 √(2(n+1)) 归一化而 m=0 模式（离焦 c4、球差 c11）为裸多项式，同元素内归一化不一致，与目录宣称的"Noll 序"不符。现补齐 √(n+1) 因子，所有系数含义统一为 RMS 归一化（新增回归测试 `TestZernikeNollNormalization`）。**行为变更**：与旧版本相比 c4 需乘 1/√3、c11 需乘 1/√5 才能复现旧的波前幅值。
+- 新增复场级回归测试集 `optics/complex_field_test.go`（9 项）：单频倾斜平面波正/反向精确性（asm/asm_shift，含近带边强倾斜）、Fresnel–Gaussian 解析闭式解对比（asm/asm_pad/fresnel_tf）、夫琅禾费复场精确性、远场告警方向、pad/shift 变体复场一致性、矢量 ASM 单频平面波 Ez 重构精确性、球面波会聚相位与聚焦行为、泽尼克 Noll 归一化。
+
 ## [v0.3.1] - 2026-08-28
 
 ### 新增
@@ -80,7 +92,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.2...HEAD
+[v0.3.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.1...v0.3.2
 [v0.3.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases/tag/v0.2.0

@@ -487,16 +487,36 @@ func propFresnelIR(f *Field, z float64, ctx *Context) {
 // propFraunhofer: far field. The FFT output is reordered so that the new
 // grid keeps the same centered layout as the input grid (pixel size changes
 // to lambda*|z|/(N*dx)).
+//
+// Layout note: with the centered input layout x(i) = (i - N/2)*dx the raw DFT
+// bins F[p,q] relate to the sampled continuous Fourier transform by
+// FT{U}(f_p, f_q) = dx^2 * e^{i pi (p+q)} * F[p,q]. The fftshift alone would
+// therefore leave a Nyquist checkerboard (-1)^(i+j) on the output field —
+// invisible in |U|^2 but wrong in phase (pi flips between adjacent pixels)
+// and fatal for any later coherent use of the far field. The e^{i pi (p+q)}
+// factor is applied before re-centering to cancel it.
 func propFraunhofer(f *Field, z float64, ctx *Context) {
 	wl := ctx.Wavelength
 	k := 2 * math.Pi / wl
 	n := f.N
 	dxOut := wl * math.Abs(z) / (float64(n) * f.DX)
+	// Fresnel-number validity check (D = input field support radius); must be
+	// evaluated BEFORE the field is overwritten with the far-field pattern.
+	dIn := f.rmsRadius()
 	shift := make([]complex128, n*n)
 	apply := func(a []complex128) {
 		fft2D(a, n, false)
 		for i := range a {
 			a[i] *= complex(f.DX*f.DX, 0)
+		}
+		// Cancel the centered-layout checkerboard e^{i pi (p+q)} (see above).
+		for j := 0; j < n; j++ {
+			row := j * n
+			for i := 0; i < n; i++ {
+				if (i+j)&1 == 1 {
+					a[row+i] = -a[row+i]
+				}
+			}
 		}
 		// 2D fftshift by N/2 so the DC bin maps to the grid center (N/2, N/2).
 		half := n / 2
@@ -524,9 +544,10 @@ func propFraunhofer(f *Field, z float64, ctx *Context) {
 	if f.Polarized {
 		apply(f.Ey)
 	}
-	// Fresnel-number validity check (D = field support radius).
-	if a := f.rmsRadius(); a > 0 {
-		nf := a * a / (wl * math.Abs(z))
+	// Fresnel-number validity (D = input support radius, measured above):
+	// Fraunhofer requires F = D^2/(lambda |z|) << 1.
+	if dIn > 0 {
+		nf := dIn * dIn / (wl * math.Abs(z))
 		if nf > 0.5 {
 			ctx.Warnings.Add("fraunhofer_nearfield",
 				fmt.Sprintf("夫琅禾费传播的菲涅耳数 F=%g > 0.5，远场条件不满足，结果可能不准确；请改用角谱法", nf), nf)

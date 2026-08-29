@@ -242,7 +242,7 @@ var ElementDocs = []ElementDoc{
 			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
 		}},
-	{Type: "zernike", Label: "泽尼克像差板", Help: "Noll 序 1-21 项泽尼克波前像差（单位：波长），用于研究像差。",
+	{Type: "zernike", Label: "泽尼克像差板", Help: "Noll 序 1-21 项泽尼克波前像差（单位：波长，各系数为 RMS 归一化），用于研究像差。",
 		Params: zernikeParams()},
 	{Type: "polarizer", Label: "线偏振片", Help: "琼斯投影矩阵，透振方向 angle。",
 		Params: []ParamSpec{

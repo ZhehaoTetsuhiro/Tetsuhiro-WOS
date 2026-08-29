@@ -998,7 +998,10 @@ func (e *zernikeEl) Apply(f *Field, ctx *Context) error {
 					ang = math.Sin(float64(-mm) * theta)
 				}
 				if mm == 0 {
-					opd += c * rad
+					// Noll normalization: sqrt(n+1) for the m=0 modes
+					// (sqrt(2(n+1)) for m!=0 below), so every coefficient
+					// carries the same RMS meaning.
+					opd += c * math.Sqrt(float64(nn+1)) * rad
 				} else {
 					opd += c * math.Sqrt(2*float64(nn+1)) * rad * ang
 				}
