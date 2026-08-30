@@ -37,7 +37,9 @@
               "type": "propagate"
             },
             {
-              "params": {},
+              "params": {
+                "tilt_x": 0.0005
+              },
               "type": "mirror"
             },
             {

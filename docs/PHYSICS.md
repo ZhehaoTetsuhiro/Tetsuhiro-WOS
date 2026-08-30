@@ -135,6 +135,7 @@ auto 始终选择 ASM（精确）。近似方法仅在显式指定时使用并�
 | TestJonesCalculus | QWP 圆偏振、正交偏振片消光、45° 透过率 | 通过 |
 | TestMachZehnder | 互补端口、λ/2/λ/4 相差、能量守恒 | 通过 |
 | TestMichelson | 折返臂相位 2kL、双端口能量守恒 | 通过 |
+| TestMichelsonBalancedArms | 等臂时两臂等相位，探测器暗口、回光源端口亮口，总功率守恒 | 通过 |
 | TestZonePlate | 焦点在 f 不在 2f，效率≈4/π² | 通过 |
 | TestBackwardRoundTrip | 往返振幅=2z 传播，轴上相位=k·2z−atan(2z/zR)（Gouy） | 通过 |
 | TestSpeckleContrast | 强漫射体散斑对比度≈1，功率守恒 | 通过 |

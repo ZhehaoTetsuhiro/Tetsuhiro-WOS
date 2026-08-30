@@ -7,7 +7,7 @@
 - **光学元件**：20+ 种可调参数元件（透镜、光阑、光栅、轴锥镜、波带片、涡旋相位板、楔形棱镜、漫射体、反射镜、凹面镜、凸面镜、泽尼克像差板、偏振片、波片、旋光片、自定义琼斯矩阵、分束器、合束器、单轴晶体、均匀介质、双轴晶体……），全部参数可调。
 - **量子光学**：Fock 基线性光学内核（Fock/相干/压缩/双模压缩/热态、相移/分束器/位移/压缩/损耗门），光子数分布、g²(0)、正交分量、联合分布——Hong-Ou-Mandel、单光子马赫-曾德尔、压缩、EPR、混合态/损耗等效应可复现，并支持 PNG/SVG 图表导出（docs/QUANTUM.md）。
 - **物理完备性**：琼斯矢量偏振（2 分量）、全矢量 Ez（3 分量）、折返光路（反射镜/迈克尔逊）、分束臂与相干合束（马赫-曾德尔等干涉仪）、功率归一化（SI 单位）、质心/RMS/Strehl 等指标、一维剖面。
-- **精度验证**：`go test ./optics/` 内含 76 项物理与数值测试——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
+- **精度验证**：`go test ./optics/` 内含 77 项物理与数值测试——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
 - **GUI**：浏览器页面，**鼠标与键盘双可用**（Tab/方向键/快捷键，见 docs/GUI.md）；支持 n 新建、o 打开、s 保存配置 JSON 文件、m 切换量子光学模式、h 隐藏中心图样、自定义网格大小、毛玻璃视觉主题。
 - **接入**：内核即库（import "twos/optics"），HTTP API 供任意语言调用。详见 docs/INTEGRATION.md（以内核开发为主）。
 
@@ -15,8 +15,8 @@
 
 本项目分两个发布通道：
 
-- **Release**（`v0.3.2`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.2`，`docker/podman run` 直接运行。
+- **Release**（`v0.3.3`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -27,8 +27,8 @@
 
 容器镜像：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.2
-    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.2
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3
+    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3
 
 ## 快速开始
 
@@ -40,7 +40,7 @@
 
 运行精度测试套件：
 
-    go test ./optics/ -v        # 76 项物理与数值测试
+    go test ./optics/ -v        # 77 项物理与数值测试
     go run ./examples/demo      # 内核库用法：透镜聚焦，输出 PNG 与指标
     go run ./examples/interferometer
     go run ./examples/quantum   # 量子光学：HOM / 相干 / 压缩 / EPR

@@ -2,6 +2,20 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.3.3] - 2026-08-30
+
+### 修复（内核）
+
+- 修复 bandlimit 在分束器后应用导致暗口出现数值条纹的缺陷。原实现每个元素后都施加奈奎斯特带限，分束器后主臂（继续在主循环传播）和子臂（进入子训练传播）经历的 FFT 次数不同，产生不对称的浮点舍入误差；等臂时两臂残余相位差约 3e-8 rad，在暗口形成 ~1e-15 相对可见度的周期性条纹图样。现改为仅在 propagate 元素后施加 bandlimit（分束器/反射镜本身不产生超出带限的频率分量），修复后暗口功率精确为 0。
+
+### 新增（测试）
+
+- 新增等臂 Michelson 回归测试 `TestMichelsonBalancedArms`：验证两臂完全等光程时探测器为暗口、回光源端口为亮口，总功率守恒。
+
+### 变更（示例）
+
+- Michelson preset 折返臂反射镜增加 `tilt_x = 0.5 mrad` 倾斜，使两臂返回时存在横向波前倾角，探测器端口产生周期约 0.5 mm 的等厚干涉条纹——这是 Michelson 干涉仪最经典的可视化模式。等臂（无倾斜）时暗口精确为零的行为由新增回归测试覆盖；新增 `examples/presets/michelson.svg` 光路示意图。
+
 ## [v0.3.2] - 2026-08-29
 
 ### 修复（传播内核复场级审查）
@@ -92,7 +106,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...HEAD
+[v0.3.3]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.2...v0.3.3
 [v0.3.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.1...v0.3.2
 [v0.3.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.2.0...v0.3.0

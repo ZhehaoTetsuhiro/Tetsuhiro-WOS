@@ -379,6 +379,41 @@ func TestMichelson(t *testing.T) {
 	}
 }
 
+func TestMichelsonBalancedArms(t *testing.T) {
+	cfg := scalarCfg(256, 0.01, 632.8e-9)
+	cfg.Source = planeSource()
+	cfg.Elements = []ElementSpec{
+		{Type: "propagate", Params: map[string]any{"distance": 0.01}},
+		{Type: "beamsplitter", Params: map[string]any{"reflectivity": 0.5, "reflected_arm": map[string]any{
+			"elements": []any{
+				map[string]any{"type": "propagate", "params": map[string]any{"distance": 0.01}},
+				map[string]any{"type": "mirror", "params": map[string]any{}},
+				map[string]any{"type": "propagate", "params": map[string]any{"distance": 0.01}},
+			},
+		}}},
+		{Type: "propagate", Params: map[string]any{"distance": 0.01}},
+		{Type: "mirror", Params: map[string]any{}},
+		{Type: "propagate", Params: map[string]any{"distance": 0.01}},
+		{Type: "combiner", Params: map[string]any{"outputs": []any{
+			map[string]any{"label": "det", "weights": []any{
+				map[string]any{"arm": "main", "re": 0.70710678, "im": 0},
+				map[string]any{"arm": "bs0", "re": 0, "im": 0.70710678}}},
+			map[string]any{"label": "src_port", "weights": []any{
+				map[string]any{"arm": "main", "re": 0, "im": 0.70710678},
+				map[string]any{"arm": "bs0", "re": 0.70710678, "im": 0}}},
+		}}},
+	}
+	res := mustSim(t, cfg)
+	pDet := res.Planes[0].Stats.Power
+	pSrc := res.Planes[1].Stats.Power
+	if pDet > 1e-4 {
+		t.Fatalf("balanced Michelson detector power %g W, want ~0", pDet)
+	}
+	if rel := math.Abs(pSrc - 1e-3) / 1e-3; rel > 0.01 {
+		t.Fatalf("balanced Michelson source-port power %g W, want 1e-3", pSrc)
+	}
+}
+
 // --- 7. Fresnel zone plate: strong focus at f, none at 2f ---
 
 func TestZonePlate(t *testing.T) {

@@ -252,7 +252,12 @@ func (t *trainer) runTrain(elements []ElementSpec, f *Field, armID string, depth
 				return fmt.Errorf("element %d: %v", k, err)
 			}
 		}
-		if ctx.Bandlimit != nil {
+		// Apply bandlimit only after propagation. Applying it after
+		// beamsplitters or mirrors introduces asymmetric FFT round-trip
+		// noise between the main and child arms (the child arm's sub-train
+		// does not see the parent's post-BS bandlimit), which produces
+		// structured fringes in nominally dark interferometer ports.
+		if ctx.Bandlimit != nil && spec.Type == "propagate" {
 			f.ApplyBandlimit(ctx.Bandlimit)
 		}
 	}
