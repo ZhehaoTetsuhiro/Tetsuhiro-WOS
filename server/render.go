@@ -79,6 +79,24 @@ func phaseLUT() [256]color.RGBA {
 	return out
 }
 
+// azimuthLUT colours the polarization azimuth. Azimuth is defined modulo π (ψ
+// and ψ+π describe the same axis), so the hue wheel must span exactly one π of
+// azimuth: ψ = -π/2 and ψ = +π/2 then land on the same colour and the map has
+// no seam at the wrap, unlike mapping the range onto the full 2π phase wheel.
+func azimuthLUT() [256]color.RGBA {
+	var out [256]color.RGBA
+	for i := 0; i < 256; i++ {
+		psi := (float64(i)/255 - 0.5) * math.Pi // -π/2 … +π/2
+		h := 2 * psi * 180 / math.Pi            // -180° … +180°
+		if h < 0 {
+			h += 360
+		}
+		r, g, b := hsv2rgb(h, 0.85, 0.95)
+		out[i] = color.RGBA{uint8(r * 255), uint8(g * 255), uint8(b * 255), 255}
+	}
+	return out
+}
+
 var grayLUT = func() [256]color.RGBA {
 	var out [256]color.RGBA
 	for i := 0; i < 256; i++ {
@@ -109,83 +127,7 @@ func hsv2rgb(h, s, v float64) (float64, float64, float64) {
 	return rp + m, gp + m, bp + m
 }
 
-// ---- plane rendering -------------------------------------------------------
-
-// renderPlane rasterizes one field view into an RGBA image using the
-// requested colormap and scaling.
-func renderPlane(pl *optics.Plane, get func(int) float64, q url.Values) (*image.RGBA, error) {
-	n := pl.Size
-	// Data range: explicit pmin/pmax, otherwise plane stats.
-	var vmin, vmax float64
-	if s := q.Get("pmin"); s != "" {
-		if v, err := parseFloat(s); err == nil {
-			vmin = v
-		}
-	}
-	if s := q.Get("pmax"); s != "" {
-		if v, err := parseFloat(s); err == nil {
-			vmax = v
-		}
-	}
-	field := q.Get("field")
-	isPhase := field == "phase_x" || field == "phase_y" || field == "phase_z"
-	if vmax == vmin {
-		if isPhase {
-			vmin, vmax = -math.Pi, math.Pi
-		} else {
-			vmin, vmax = pl.Stats.IntensityMin, pl.Stats.IntensityMax
-		}
-		if vmax <= vmin {
-			vmax = vmin + 1
-		}
-	}
-	scale := q.Get("scale")
-	if scale == "" {
-		if isPhase {
-			scale = "lin"
-		} else {
-			scale = "log"
-		}
-	}
-	cmap := q.Get("cmap")
-	var lut [256]color.RGBA
-	switch cmap {
-	case "phase":
-		lut = phaseLUT()
-	case "gray":
-		lut = grayLUT
-	default:
-		if isPhase {
-			lut = phaseLUT()
-		} else {
-			lut = infernoLUT
-		}
-	}
-	dyn := 1e4 // log dynamic range (4 decades below peak)
-	img := image.NewRGBA(image.Rect(0, 0, n, n))
-	for j := 0; j < n; j++ {
-		row := j * n
-		for i := 0; i < n; i++ {
-			v := get(row + i)
-			var t float64
-			if scale == "log" && !isPhase {
-				vp := math.Max(v-vmin, 0) / (vmax - vmin)
-				t = math.Log10(1+vp*(dyn-1)) / math.Log10(dyn)
-			} else {
-				t = (v - vmin) / (vmax - vmin)
-			}
-			if t < 0 {
-				t = 0
-			}
-			if t > 1 {
-				t = 1
-			}
-			c := lut[int(t*255)]
-			img.SetRGBA(i, j, c)
-		}
-	}
-	return img, nil
-}
+// ---- encoding ---------------------------------------------------------------
 
 func pngEncode(w io.Writer, img image.Image) error {
 	bw := bufio.NewWriter(w)
@@ -425,23 +367,31 @@ func RenderQuantumSVG(path string, res *optics.QuantumResult) error {
 	return os.WriteFile(path, []byte(renderQuantumSVG(res)), 0o644)
 }
 
-// RenderPlanePNG writes one field view of a plane to a PNG file. field is
-// one of total/ex/ey/phase_x/phase_y, scale is lin or log, cmap is inferno,
-// phase or gray. This is the kernel-level visualization helper; the web GUI
-// fetches raw float32 instead and renders client-side.
+// RenderPlanePNG writes one field view of a plane to a PNG file. field is any
+// view name accepted by the plane endpoint (total/ex/ey/phase_x/phase_u/
+// pol_azimuth/color/...), scale is lin or log and cmap is inferno, phase, gray,
+// diverging. This is the kernel-level visualization helper; the web GUI fetches
+// raw float32 or the same PNG through the HTTP API.
 func RenderPlanePNG(path string, pl *optics.Plane, field, scale, cmap string) error {
-	get := fieldGetter(pl, field)
-	if get == nil {
-		return fmt.Errorf("unknown field %q", field)
-	}
-	q := url.Values{"field": []string{field}}
+	q := url.Values{}
 	if scale != "" {
 		q.Set("scale", scale)
 	}
 	if cmap != "" {
 		q.Set("cmap", cmap)
 	}
-	img, err := renderPlane(pl, get, q)
+	var img *image.RGBA
+	var err error
+	if field == "color" || field == "" {
+		img, err = renderColor(pl, q)
+	} else {
+		var vals []float64
+		var info viewInfo
+		vals, info, _, err = planeValues(pl, field, -1, 0)
+		if err == nil {
+			img, err = renderValues(vals, pl.Size, info, q)
+		}
+	}
 	if err != nil {
 		return err
 	}

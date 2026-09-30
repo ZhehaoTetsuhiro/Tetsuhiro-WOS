@@ -1,6 +1,6 @@
 # HTTP API 参考（docs/API.md）
 
-基址：http://localhost:8080（-addr 可改）。全部响应 JSON（二进制/PNG 端点除外），CORS 全开。错误统一为 {"error":"..."}。
+基址：http://localhost:1120（-addr 可改）。全部响应 JSON（二进制/PNG 端点除外），CORS 全开。错误统一为 {"error":"..."}。
 
 ## 端点一览
 
@@ -14,6 +14,9 @@
 | GET | /api/runs/{id} | 状态 + 结果元数据；status = running / done / error |
 | GET | /api/runs/{id}/planes/{pid} | 平面场数据：fmt=bin（float32）或 fmt=png |
 | GET | /api/runs/{id}/profiles/{pid} | 一维剖面 JSON |
+| GET | /api/runs/{id}/inspect/{pid} | 局部读数：该像素的琼斯矢量、斯托克斯参数、偏振椭圆、相位（含波前 PV/RMS）与强度 |
+| GET | /api/runs/{id}/scene | 路由出的光路几何（元件、光束段、包围盒）与各光源颜色，供立体视图使用 |
+| POST | /api/convert | 把旧的 elements 元件序列配置转换为定位场景（scene + sources），不计算 |
 
 静态资源（/ 与 /app.js、/style.css）为内嵌的键盘操作 GUI。
 
@@ -77,18 +80,25 @@ state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / th
 
 | 参数 | 取值 | 默认 |
 |---|---|---|
-| field | total / ex / ey / phase_x / phase_y | total |
+| field | total / amplitude / ex / ey / ez / phase_x / phase_y / phase_z / phase_u / pol_azimuth / pol_ellip / pol_s1 / pol_s2 / pol_s3 / pol_degree / pol_intensity / color | total |
 | fmt | bin / png | bin |
-| scale | lin / log（仅强度视图） | 强度 log，相位 lin |
-| cmap | inferno / phase / gray | 按视图 |
+| part | 相干单元序号（光源分组后的编号），缺省为全部单元的合成 | -1 |
+| scale | lin / log（强度类） | 强度 log，相位/偏振 lin |
+| cmap | inferno / phase / gray / diverging | 按视图（相位与偏振方位角用 phase，斯托克斯/椭率用 diverging） |
+| mask | 相位/偏振视图的强度掩膜阈值（相对峰值） | 相位 2e-3，偏振 1e-6 |
+| exposure, gamma | 颜色视图的曝光倍数与 γ（仅 field=color&fmt=png） | 1，1 |
 | pmin, pmax | 手动数据范围（物理单位） | 自动（stats 或 ±π） |
+
+`field=color` 只支持 `fmt=png`：按各光源波长把强度映射为真实颜色的 sRGB 图像（亮度为真实强度，曝光按 2 的幂缩放）。
+
+部分视图需要复振幅，当平面含多个互不相干的光源单元时请用 `part=N` 指定其一（`GET /api/runs/{id}` 的 planes[].parts 列出各单元）。
 
 fmt=bin：float32 小端裸数组 N×N（行主序），无头，长度 4·N² 字节。
 fmt=png：RGBA PNG（大小 = 网格尺寸）。
 
 ## GET /api/runs/{id}/profiles/{pid}
 
-查询参数：axis = x | y（默认 x）；field 同上；coord = 固定坐标（m，缺省用强度质心）。
+查询参数：axis = x | y（默认 x）；field 同上（`color` 除外，颜色是色调图，用 `total` 取曲线）；coord = 固定坐标（m，缺省用强度质心）；part = 相干单元序号。被掩膜的相位点返回 `null`（GUI 曲线会自动跳过）。
 
     {"axis":"x","coord":0,"x":[-0.005,...],"v":[9.6e-8,...]}
 
@@ -97,3 +107,26 @@ x 为位置数组（m），v 为对应场量（剖面为 3 像素厚切片的平
 ## 运行缓存
 
 完成的运行保留在内存 LRU 中（-max-run-mb，默认 512 MB 预算，按平面复数数据字节数计），被驱逐后返回 404。仿真串行执行：并发提交按顺序排队（状态保持 running）。
+
+## GET /api/runs/{id}/inspect/{pid}
+
+查询参数：`x`、`y` 为像素索引（行主序，0 起点），缺省用强度质心；`part` 选择相干单元。返回：
+
+    {"part":0,"label":"…","wavelength":6.328e-7,
+     "x":256,"y":219,"pos_x":0,"pos_y":-0.000645,
+     "ex_re":3.79,"ex_im":1.56,"ey_re":0,"ey_im":0,
+     "intensity":16.78,"phase":0.39,"phase_unwrapped":1.19,
+     "stokes":{"s0":16.78,"s1":16.78,"s2":0,"s3":0,"azimuth":0,"ellipticity":0,
+               "axis_ratio":0,"handedness":"线偏振","degree":1},
+     "phase_stats":{"pv":3.46,"rms":0.71,"waves":0.55},
+     "parts":1,"merged_units":false}
+
+GUI 用它在鼠标位置实时显示偏振态与相位（含以 λ 为单位的波前 PV/RMS）。
+
+## POST /api/convert
+
+请求体为任意配置；若其中只有 `elements`（旧格式），返回 `{"scene":{...},"sources":[...]}`——沿 +z 按累计传播距离摆放元件、探测器正对来光。若配置已经是场景，则原样返回。GUI 打开旧预设文件时自动调用。
+
+## GET /api/runs/{id}/scene
+
+返回路由出的光路几何（`{scene:{components,segments,min,max},sources:[{index,pos,dir,wavelength,label,hex}]}`）。`hex` 是该波长的显示颜色，立体视图直接使用。

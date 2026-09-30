@@ -2,7 +2,7 @@
 """Tetsuhiro WOS 内核的 Python 客户端示例（仅标准库 + 可选 numpy）。
 
 用法:
-    python3 examples/python_client.py http://localhost:8080
+    python3 examples/python_client.py http://localhost:1120
 
 流程: POST /api/simulate -> 轮询 /api/runs/{id} -> 拉取 float32 二进制平面
      -> 打印指标；有 numpy 时保存 .npy 并打印光斑尺寸。
@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.request
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:1120"
 
 CONFIG = {
     "grid": {"size": 1024, "width": 0.01},

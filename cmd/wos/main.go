@@ -2,7 +2,7 @@
 // keyboard-operated web GUI.
 //
 //	go build -o wos ./cmd/wos
-//	./wos -addr :8080        # then open http://localhost:8080
+//	./wos -addr :1120        # then open http://localhost:1120
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 var webFS embed.FS
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
+	addr := flag.String("addr", ":1120", "listen address")
 	maxMB := flag.Int64("max-run-mb", 512, "in-memory budget for stored run data")
 	flag.Parse()
 

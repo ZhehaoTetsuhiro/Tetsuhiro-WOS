@@ -167,6 +167,66 @@ func (f *Field) ApplyTilt(tx, ty, wl float64) {
 	}
 }
 
+// ApplyLinearPhase multiplies the field by exp(i k (du*x + dv*y)), i.e. adds a
+// linear phase ramp in the transverse coordinates. du and dv are transverse
+// direction cosines, so k=2π/λ turns a wavefront tilt into a phase ramp. Used
+// for the relative wavefront tilt of beams that recombine slightly out of
+// alignment.
+func (f *Field) ApplyLinearPhase(k float64, du, dv float64) {
+	if du == 0 && dv == 0 {
+		return
+	}
+	for j := 0; j < f.N; j++ {
+		phv := k * dv * f.Y(j)
+		for i := 0; i < f.N; i++ {
+			idx := j*f.N + i
+			t := cexpI(k*du*f.X(i) + phv)
+			f.Ex[idx] *= t
+			if f.Polarized {
+				f.Ey[idx] *= t
+			}
+			if f.Vectorial {
+				f.Ez[idx] *= t
+			}
+		}
+	}
+}
+
+// ShiftField translates the field content by (+du, +dv) meters in the
+// transverse plane: the result G satisfies G(x,y) = F(x-du, y-dv). The shift is
+// applied as an exact Fourier phase ramp, so it is band-limited and lossless for
+// fields that fit the grid.
+func (f *Field) ShiftField(du, dv float64) {
+	if du == 0 && dv == 0 {
+		return
+	}
+	n := f.N
+	ramp := func(a []complex128) {
+		if a == nil {
+			return
+		}
+		buf := make([]complex128, len(a))
+		copy(buf, a)
+		fft2D(buf, n, false)
+		for j := 0; j < n; j++ {
+			fy := f.freq(j)
+			for i := 0; i < n; i++ {
+				fx := f.freq(i)
+				buf[j*n+i] *= cexpI(-2 * math.Pi * (fx*du + fy*dv))
+			}
+		}
+		fft2D(buf, n, true)
+		copy(a, buf)
+	}
+	ramp(f.Ex)
+	if f.Polarized {
+		ramp(f.Ey)
+	}
+	if f.Vectorial {
+		ramp(f.Ez)
+	}
+}
+
 // cexpI returns exp(i*phi).
 func cexpI(phi float64) complex128 {
 	s, c := math.Sincos(phi)

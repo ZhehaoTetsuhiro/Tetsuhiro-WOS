@@ -34,7 +34,7 @@ header h1 .version {
 .status { flex: 1; color: #5a7d9e; }
 main { flex: 1; display: flex; gap: 8px; padding: 6px; min-height: 0; }
 aside { width: 260px; min-width: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: none; }
-#center { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#center { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-y: auto; }
 #waveOutput, #quantumOutput { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 #quantumOutput { overflow-y: auto; }
 section {
@@ -83,14 +83,46 @@ button:hover, select:hover { border-color: var(--accent); }
 /* canvas */
 #viewTabs { display: flex; gap: 6px; flex-wrap: wrap; }
 #viewTabs button.active { background: #cfe3f7; border-color: var(--accent); }
-#canvasWrap { position: relative; flex: 1; min-height: 240px; display: flex; align-items: center; justify-content: center;
+#channelBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+#channelBar label { color: #4a6d8f; }
+#channelBar select { max-width: 240px; }
+#channelBar input[type=range] { width: 120px; }
+#canvasWrap { position: relative; flex: 1; min-height: 170px; display: flex; align-items: center; justify-content: center;
   background: #bfe0f3; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-#view { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+#view { max-width: 100%; max-height: 100%; image-rendering: pixelated; cursor: crosshair; }
+#view3d { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#view3d.dragging { cursor: grabbing; }
+#view3dHint { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #3d6285;
+  background: rgba(251,253,255,.85); border-radius: 6px; padding: 3px 7px;
+  display: flex; align-items: center; gap: 8px; }
+#view3dHint button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: #6b8399;
+  background: transparent; border: 1px solid rgba(120,150,175,.5); border-radius: 4px;
+  box-shadow: none; opacity: .75; }
+#view3dHint button.mini:hover { opacity: 1; color: #2c4b68; border-color: rgba(90,125,158,.9); background: rgba(233,242,250,.9); }
 #prof { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #planeNav { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
   background: rgba(251,253,255,.9); border-radius: 6px; padding: 4px; }
 #stats { font-size: 12px; color: #33475c; white-space: pre-line; }
 #stats b { color: var(--fg); }
+
+/* readout under the image */
+#inspectBox { display: flex; gap: 12px; align-items: flex-start; font-size: 12px; color: #33475c; padding-bottom: 4px; }
+#inspectBox .cards { display: flex; gap: 14px; flex-wrap: wrap; flex: 1; }
+#inspectBox .card { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 150px; }
+#inspectBox .card b { display: block; color: var(--accent); font-size: 12px; margin-bottom: 3px; }
+#inspectBox .kv { font-variant-numeric: tabular-nums; white-space: pre-line; }
+#ellipseCv { width: 116px; height: 116px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; }
+#inspectBox .hint { margin: 0; }
+
+/* scene + source lists */
+#sceneList, #sourceList { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; max-height: 34vh; overflow-y: auto; }
+.sc { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  margin: 0; padding: 4px 8px; border-radius: 5px; background: var(--panel2); }
+.sc.sel { background: #cfe3f7; border-color: var(--accent); }
+.sc .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; border: 1px solid rgba(20,50,70,.35); }
+.sc .tag { color: #5a7d9e; font-size: 11px; margin-left: auto; white-space: nowrap; }
+.subhead { font-size: 12px; color: #4a6d8f; margin: 8px 0 2px; }
+
 
 /* right column */
 #warnings .w { background: #fdf3dd; border-left: 3px solid var(--warn); padding: 4px 8px; margin: 4px 0; border-radius: 4px; font-size: 12px; }

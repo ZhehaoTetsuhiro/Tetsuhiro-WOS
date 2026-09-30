@@ -101,18 +101,18 @@ json.Unmarshal 到 optics.Config 即完成解析；ValidateConfig 给出逐项�
 
 启动服务：
 
-    go build -o wos ./cmd/wos && ./wos -addr :8080
+    go build -o wos ./cmd/wos && ./wos -addr :1120
 
 端点总览（详见 docs/API.md）：POST /api/simulate（202，返回 run_id）→ 轮询 GET /api/runs/{id} → GET 平面二进制/PNG 与剖面。
 
 ### 2.1 curl 全流程
 
     curl -s -X POST -H 'Content-Type: application/json' --data @system.json \
-         http://localhost:8080/api/simulate          # {"run_id":"...","status":"running"}
-    curl -s http://localhost:8080/api/runs/<RUN>     # 轮询到 status=done，取 planes[].id
-    curl -s -o plane.bin "http://localhost:8080/api/runs/<RUN>/planes/sensor_0?field=total&fmt=bin"
-    curl -s -o plane.png "http://localhost:8080/api/runs/<RUN>/planes/sensor_0?field=total&fmt=png&scale=log&cmap=inferno"
-    curl -s "http://localhost:8080/api/runs/<RUN>/profiles/sensor_0?axis=x&field=total"
+         http://localhost:1120/api/simulate          # {"run_id":"...","status":"running"}
+    curl -s http://localhost:1120/api/runs/<RUN>     # 轮询到 status=done，取 planes[].id
+    curl -s -o plane.bin "http://localhost:1120/api/runs/<RUN>/planes/sensor_0?field=total&fmt=bin"
+    curl -s -o plane.png "http://localhost:1120/api/runs/<RUN>/planes/sensor_0?field=total&fmt=png&scale=log&cmap=inferno"
+    curl -s "http://localhost:1120/api/runs/<RUN>/profiles/sensor_0?axis=x&field=total"
 
 ### 2.2 二进制平面格式
 
@@ -123,7 +123,7 @@ json.Unmarshal 到 optics.Config 即完成解析；ValidateConfig 给出逐项�
 
 ### 2.3 Python 客户端
 
-    python3 examples/python_client.py http://localhost:8080
+    python3 examples/python_client.py http://localhost:1120
 
 输出指标、剖面，并将平面保存为 wos_plane.npy（自动实测艾里斑暗环与理论对比）。
 
@@ -143,7 +143,7 @@ Fock 基线性光学同步接口（微秒级，直接返回结果）：
 
     curl -s -X POST -H 'Content-Type: application/json' \
          --data '{"modes":2,"cutoff":4,"state":{"type":"fock","params":{"occupation":[1,1]}},"gates":[{"type":"beam_splitter","params":{"mode0":0,"mode1":1,"reflectivity":0.5}}]}' \
-         http://localhost:8080/api/quantum
+         http://localhost:1120/api/quantum
 
 返回光子数分布、g²(0)、正交分量与联合分布（Hong-Ou-Mandel 等），协议见 docs/QUANTUM.md §6 与 docs/API.md。
 

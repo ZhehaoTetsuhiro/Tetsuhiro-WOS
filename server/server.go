@@ -9,6 +9,14 @@
 //	GET  /api/runs/{id}                        run status + result metadata
 //	GET  /api/runs/{id}/planes/{pid}?field=...&fmt=bin|png&scale=lin|log&cmap=...
 //	GET  /api/runs/{id}/profiles/{pid}?axis=x|y&field=...&coord=...
+//	GET  /api/runs/{id}/inspect/{pid}?x=&y=&part=    local Jones/Stokes/phase readout
+//	GET  /api/runs/{id}/scene                        routed light path (3D layout view)
+//
+// Plane field views (?field=...) are total/amplitude/ex/ey/ez, phase_x/phase_y/
+// phase_z (wrapped), phase_u (unwrapped wavefront), pol_azimuth/pol_ellip/
+// pol_s1/pol_s2/pol_s3/pol_degree and color (real-wavelength RGB, PNG only).
+// ?part=N selects one coherent unit (one source group) for the views that need
+// a complex field.
 package server
 
 import (
@@ -73,11 +81,20 @@ func New(maxBytes int64) *Server {
 	}
 }
 
+// writeJSON marshals the value *before* touching the response: NaN or ±Inf
+// anywhere in the payload makes encoding/json fail, and writing the header
+// first used to turn that into an empty 200 that the client could not even
+// report.
 func writeJSON(w http.ResponseWriter, code int, v any) {
+	buf, err := json.Marshal(v)
+	if err != nil {
+		code = http.StatusInternalServerError
+		buf = []byte(`{"error":"response contains non-finite numbers"}`)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(buf)
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
@@ -154,6 +171,23 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("/api/convert", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeErr(w, http.StatusMethodNotAllowed, "POST only")
+			return
+		}
+		cfg, err := decodeConfig(w, r)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if cfg.IsScene() {
+			writeJSON(w, http.StatusOK, map[string]any{"scene": cfg.Scene, "sources": cfg.AllSources()})
+			return
+		}
+		scene := optics.LayoutFromElements(cfg)
+		writeJSON(w, http.StatusOK, map[string]any{"scene": scene, "sources": cfg.AllSources()})
+	})
 	mux.HandleFunc("/api/simulate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeErr(w, http.StatusMethodNotAllowed, "POST only")
@@ -217,6 +251,11 @@ func (s *Server) Handler() http.Handler {
 				writeErr(w, http.StatusNotFound, "unknown plane id")
 				return
 			}
+			// /planes/{pid}/inspect is accepted as an alias of /inspect/{pid}.
+			if len(parts) >= 4 && parts[3] == "inspect" {
+				s.serveInspect(w, r, pl)
+				return
+			}
 			s.servePlaneData(w, r, pl)
 		case "profiles":
 			if len(parts) < 3 {
@@ -229,6 +268,26 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			s.serveProfile(w, r, pl)
+		case "inspect":
+			if len(parts) < 3 {
+				writeErr(w, http.StatusBadRequest, "missing plane id")
+				return
+			}
+			pl := findPlane(snap.res, parts[2])
+			if pl == nil {
+				writeErr(w, http.StatusNotFound, "unknown plane id")
+				return
+			}
+			s.serveInspect(w, r, pl)
+		case "scene":
+			if snap.res.Scene == nil {
+				writeErr(w, http.StatusNotFound, "this run has no routed scene")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"scene":   snap.res.Scene,
+				"sources": sourceGeomWithColor(snap.res.Scene),
+			})
 		default:
 			writeErr(w, http.StatusNotFound, "unknown sub-resource")
 		}
@@ -345,6 +404,11 @@ func runBytes(e *runEntry) int64 {
 	var n int64
 	for _, p := range e.res.Planes {
 		n += int64(len(p.Ex)+len(p.Ey)+len(p.Ez)) * 16
+		// A merged plane keeps one full grid per coherent unit in Parts.
+		for i := range p.Parts {
+			pt := &p.Parts[i]
+			n += int64(len(pt.Ex)+len(pt.Ey)+len(pt.Ez)) * 16
+		}
 	}
 	return n
 }
@@ -395,6 +459,110 @@ func (s *Server) writeRunMeta(w http.ResponseWriter, id string, e *runSnapshot) 
 			planes = append(planes, p.Info())
 		}
 		out["planes"] = planes
+		out["views"] = viewNames()
+		if e.res.Scene != nil {
+			out["scene"] = e.res.Scene
+			out["sources"] = sourceGeomWithColor(e.res.Scene)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceColor is a source plus the colour it should be drawn in.
+type sourceColor struct {
+	optics.SourceGeom
+	Color   [3]float64 `json:"color"` // linear sRGB, unit peak
+	Visible bool       `json:"visible"`
+	Hex     string     `json:"hex"`
+}
+
+// sourceGeomWithColor decorates the traced sources with their display colour so
+// the GUI can label channels and draw beams the way they look.
+func sourceGeomWithColor(tr *optics.SceneTrace) []sourceColor {
+	out := make([]sourceColor, 0, len(tr.Sources))
+	for _, s := range tr.Sources {
+		r, g, b, vis := optics.WavelengthRGB(s.Wavelength)
+		out = append(out, sourceColor{
+			SourceGeom: s,
+			Color:      [3]float64{r, g, b},
+			Visible:    vis,
+			Hex:        fmt.Sprintf("#%02x%02x%02x", int(r*255+0.5), int(g*255+0.5), int(b*255+0.5)),
+		})
+	}
+	return out
+}
+
+// serveInspect returns the full local state at one point of a plane: the Jones
+// vector, the Stokes parameters, the polarization ellipse and the phase. This
+// is what makes the polarization and phase readouts convenient — the GUI asks
+// for the pixel under the cursor.
+func (s *Server) serveInspect(w http.ResponseWriter, r *http.Request, pl *optics.Plane) {
+	q := r.URL.Query()
+	part := -1
+	if ps := q.Get("part"); ps != "" {
+		if v, err := parseFloat(ps); err == nil {
+			part = int(v)
+		}
+	}
+	idx := -1
+	if xs, ys := q.Get("x"), q.Get("y"); xs != "" && ys != "" {
+		xi, err1 := parseFloat(xs)
+		yi, err2 := parseFloat(ys)
+		if err1 != nil || err2 != nil {
+			writeErr(w, http.StatusBadRequest, "x and y must be numbers")
+			return
+		}
+		// NaN, ±Inf and huge values convert to a negative int (MinInt64), so a
+		// plain range check would let them through and silently fall back to the
+		// centroid readout: reject them as numbers first.
+		if !finiteNum(xi) || !finiteNum(yi) || xi < 0 || yi < 0 ||
+			xi >= float64(pl.Size) || yi >= float64(pl.Size) {
+			writeErr(w, http.StatusBadRequest, "x/y out of range")
+			return
+		}
+		idx = int(yi)*pl.Size + int(xi)
+	}
+	pp, pidx := partField(pl, part)
+	// Default to the intensity centroid so a readout is available immediately.
+	if idx < 0 {
+		dx := pl.DX
+		cx := int(math.Round(pl.Stats.CentroidX/dx + float64(pl.Size)/2))
+		cy := int(math.Round(pl.Stats.CentroidY/dx + float64(pl.Size)/2))
+		cx = clampInt(cx, 0, pl.Size-1)
+		cy = clampInt(cy, 0, pl.Size-1)
+		idx = cy*pl.Size + cx
+	}
+	st := pp.StokesAtPixel(idx)
+	unwrap := pp.UnwrapPhase(phaseMaskCut)
+	pv, rms, waves := optics.PhaseStats(unwrap, pp.Wavelength)
+	var ex, ey complex128
+	if idx < len(pp.Ex) {
+		ex = pp.Ex[idx]
+	}
+	if pp.Ey != nil && idx < len(pp.Ey) {
+		ey = pp.Ey[idx]
+	}
+	out := map[string]any{
+		"part":         pidx,
+		"label":        pp.Label,
+		"wavelength":   pp.Wavelength,
+		"x":            idx % pl.Size,
+		"y":            idx / pl.Size,
+		"pos_x":        (float64(idx%pl.Size) - float64(pl.Size)/2) * pl.DX,
+		"pos_y":        (float64(idx/pl.Size) - float64(pl.Size)/2) * pl.DX,
+		"ex_re":        real(ex),
+		"ex_im":        imag(ex),
+		"ey_re":        real(ey),
+		"ey_im":        imag(ey),
+		"intensity":    st.S0,
+		"phase":        pp.PhaseAt(idx),
+		"stokes":       st,
+		"phase_stats":  map[string]float64{"pv": pv, "rms": rms, "waves": waves},
+		"parts":        len(pl.Parts),
+		"merged_units": pl.Merged,
+	}
+	if unwrap != nil && idx < len(unwrap) && finiteNum(unwrap[idx]) {
+		out["phase_unwrapped"] = unwrap[idx]
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -410,17 +578,45 @@ func (s *Server) servePlaneData(w http.ResponseWriter, r *http.Request, pl *opti
 	if fmtStr == "" {
 		fmtStr = "bin"
 	}
-	get := fieldGetter(pl, field)
-	if get == nil {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown field %q", field))
+	part := -1
+	if ps := q.Get("part"); ps != "" {
+		if v, err := parseFloat(ps); err == nil {
+			part = int(v)
+		}
+	}
+	if field == "color" {
+		if fmtStr != "png" {
+			writeErr(w, http.StatusBadRequest, "field=color is only available as fmt=png")
+			return
+		}
+		img, err := renderColor(pl, q)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		_ = pngEncode(w, img)
+		return
+	}
+	mask := 0.0
+	if s := q.Get("mask"); s != "" {
+		if v, err := parseFloat(s); err == nil && v > 0 {
+			mask = v
+		}
+	}
+	vals, info, partIdx, err := planeValues(pl, field, part, mask)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	n := pl.Size
 	switch fmtStr {
 	case "bin":
 		buf := make([]byte, n*n*4)
-		for i := 0; i < n*n; i++ {
-			bits := math.Float32bits(float32(get(i)))
+		for i := 0; i < n*n && i < len(vals); i++ {
+			bits := math.Float32bits(float32(vals[i]))
 			buf[4*i] = byte(bits)
 			buf[4*i+1] = byte(bits >> 8)
 			buf[4*i+2] = byte(bits >> 16)
@@ -429,16 +625,19 @@ func (s *Server) servePlaneData(w http.ResponseWriter, r *http.Request, pl *opti
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("X-Grid-Size", fmt.Sprint(n))
+		w.Header().Set("X-View-Unit", info.unit)
+		w.Header().Set("X-View-Part", fmt.Sprint(partIdx))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(buf)
 	case "png":
-		img, err := renderPlane(pl, get, r.URL.Query())
+		img, err := renderValues(vals, n, info, q)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("X-View-Unit", info.unit)
 		w.WriteHeader(http.StatusOK)
 		_ = pngEncode(w, img)
 	default:
@@ -463,52 +662,32 @@ func (s *Server) serveProfile(w http.ResponseWriter, r *http.Request, pl *optics
 			coord = &v
 		}
 	}
-	prof, err := pl.ProfileOf(axis, field, coord)
+	part := -1
+	if ps := q.Get("part"); ps != "" {
+		if v, err := parseFloat(ps); err == nil {
+			part = int(v)
+		}
+	}
+	vals, info, _, err := planeValues(pl, field, part, 0)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, prof)
-}
-
-// fieldGetter returns the pixel value function for a named field view.
-func fieldGetter(pl *optics.Plane, field string) func(i int) float64 {
-	ex := pl.Ex
-	ey := pl.Ey
-	ez := pl.Ez
-	switch field {
-	case "total":
-		return func(i int) float64 {
-			s := norm2(ex[i]) + norm2(ey[i])
-			if ez != nil {
-				s += norm2(ez[i])
-			}
-			return s
-		}
-	case "ex":
-		return func(i int) float64 { return norm2(ex[i]) }
-	case "ey":
-		return func(i int) float64 { return norm2(ey[i]) }
-	case "ez":
-		return func(i int) float64 {
-			if ez == nil {
-				return 0
-			}
-			return norm2(ez[i])
-		}
-	case "phase_x":
-		return func(i int) float64 { return math.Atan2(imag(ex[i]), real(ex[i])) }
-	case "phase_y":
-		return func(i int) float64 { return math.Atan2(imag(ey[i]), real(ey[i])) }
-	case "phase_z":
-		return func(i int) float64 {
-			if ez == nil {
-				return 0
-			}
-			return math.Atan2(imag(ez[i]), real(ez[i]))
+	prof, err := profileOfValues(vals, pl.Size, pl.DX, axis, coord, pl.Stats.CentroidX, pl.Stats.CentroidY)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Masked samples (no light ⇒ no phase/polarization) cannot be encoded as
+	// JSON numbers; sending them as null marks an honest gap.
+	safe := make([]any, len(prof.V))
+	for i, v := range prof.V {
+		if finiteNum(v) {
+			safe[i] = v
 		}
 	}
-	return nil
+	out := map[string]any{"axis": prof.Axis, "coord": prof.Coord, "x": prof.X, "v": safe, "unit": info.unit}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func norm2(z complex128) float64 {
@@ -518,6 +697,9 @@ func norm2(z complex128) float64 {
 func parseFloat(s string) (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(s), 64)
 }
+
+// finiteNum reports whether v is a usable finite number.
+func finiteNum(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func newRunID() string {
 	var b [8]byte

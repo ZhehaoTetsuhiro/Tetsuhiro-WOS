@@ -6,9 +6,83 @@ import (
 )
 
 // SourceSpec describes the initial field injected at z = 0 of a train.
+//
+// In a positioned scene a source also carries where it sits on the table (Pos),
+// which way it emits (Dir), which coherent group it belongs to (Group) and
+// optionally its own wavelength (Wavelength, 0 = the config's). Sources in the
+// same non-empty group are summed coherently; different groups are mutually
+// incoherent and their intensities add.
 type SourceSpec struct {
-	Type   string         `json:"type"`
-	Params map[string]any `json:"params"`
+	ID         string         `json:"id,omitempty"`
+	Label      string         `json:"label,omitempty"`
+	Type       string         `json:"type"`
+	Params     map[string]any `json:"params"`
+	Pos        *Vec3          `json:"pos,omitempty"`
+	Dir        *Vec3          `json:"dir,omitempty"`
+	Wavelength float64        `json:"wavelength,omitempty"`
+	Group      string         `json:"group,omitempty"`
+}
+
+// Position returns the source position (origin by default).
+func (s *SourceSpec) Position() Vec3 {
+	if s == nil || s.Pos == nil {
+		return Vec3{}
+	}
+	return *s.Pos
+}
+
+// Direction returns the emission direction (the +z axis by default).
+func (s *SourceSpec) Direction() Vec3 {
+	if s == nil || s.Dir == nil || s.Dir.IsZero() {
+		return v3(0, 0, 1)
+	}
+	return s.Dir.Unit()
+}
+
+// EffectiveWavelength returns the wavelength this source emits.
+func (s *SourceSpec) EffectiveWavelength(fallback float64) float64 {
+	if s != nil && s.Wavelength > 0 {
+		return s.Wavelength
+	}
+	return fallback
+}
+
+// GroupID returns the coherent-group key of the source. A source with no group
+// is its own group (mutually incoherent with every other source).
+func (s *SourceSpec) GroupID(index int) string {
+	if s != nil && s.Group != "" {
+		return s.Group
+	}
+	return fmt.Sprintf("__solo%d", index)
+}
+
+// ResolvedID returns a stable identifier for the source.
+func (s *SourceSpec) ResolvedID(index int) string {
+	if s != nil && s.ID != "" {
+		return s.ID
+	}
+	return fmt.Sprintf("src%d", index)
+}
+
+// ResolvedLabel returns a human-facing name for the source.
+func (s *SourceSpec) ResolvedLabel(index int) string {
+	if s != nil && s.Label != "" {
+		return s.Label
+	}
+	if s != nil {
+		if d := sourceDocFor(s.Type); d != nil {
+			return fmt.Sprintf("%s %d", d.Label, index+1)
+		}
+	}
+	return fmt.Sprintf("光源 %d", index+1)
+}
+
+// Power returns the requested total power (W).
+func (s *SourceSpec) Power() float64 {
+	if s == nil {
+		return 0
+	}
+	return pfd(s.Params, "power", 1e-3)
 }
 
 // BuildSource constructs the normalized source field on the given grid.

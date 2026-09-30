@@ -16,19 +16,26 @@ type GridSpec struct {
 
 // Config is the full JSON configuration of one simulation run.
 //
+// A configuration describes either a *positioned scene* (components with a
+// place and a size, one or more sources, the light path derived from the
+// geometry) or, for backwards compatibility, a sequential element train
+// ("elements"). When both are present the scene wins.
+//
 //	{
 //	  "grid": {"size": 1024, "width": 0.01},
 //	  "wavelength": 632.8e-9,
 //	  "polarized": true,
 //	  "method": "asm",
-//	  "evanescent": "decay",
-//	  "bandlimit": {"fraction": 0.9, "sigma": 0.05},
-//	  "source": {"type": "gaussian", "params": {"waist": 0.001}},
-//	  "elements": [
-//	    {"type": "propagate", "params": {"distance": 0.1}},
-//	    {"type": "lens", "params": {"f": 0.2}},
-//	    {"type": "sensor", "params": {"label": "focus"}}
-//	  ]
+//	  "sources": [
+//	    {"type": "gaussian", "params": {"waist": 0.001}, "pos": {"x":0,"y":0,"z":-0.1}}
+//	  ],
+//	  "scene": {
+//	    "components": [
+//	      {"type": "lens", "pos": {"z": 0.05}, "shape": {"kind":"circle","params":{"radius":0.0127}},
+//	       "params": {"f": 0.2}},
+//	      {"type": "sensor", "pos": {"z": 0.25}, "label": "焦面"}
+//	    ]
+//	  }
 //	}
 type Config struct {
 	Grid               GridSpec       `json:"grid"`
@@ -41,7 +48,26 @@ type Config struct {
 	TikhonovAlpha      float64        `json:"tikhonov_alpha"`
 	Bandlimit          *BandlimitOpts `json:"bandlimit"`
 	Source             SourceSpec     `json:"source"`
-	Elements           []ElementSpec  `json:"elements"`
+	Sources            []SourceSpec   `json:"sources,omitempty"`
+	Elements           []ElementSpec  `json:"elements,omitempty"`
+	Scene              *SceneSpec     `json:"scene,omitempty"`
+}
+
+// AllSources returns every light source of the configuration. A legacy single
+// "source" is used when no "sources" list is given; a scene always needs at
+// least one entry.
+func (c *Config) AllSources() []SourceSpec {
+	if len(c.Sources) > 0 {
+		out := make([]SourceSpec, len(c.Sources))
+		copy(out, c.Sources)
+		return out
+	}
+	return []SourceSpec{c.Source}
+}
+
+// IsScene reports whether the configuration is a positioned scene.
+func (c *Config) IsScene() bool {
+	return c.Scene != nil && len(c.Scene.Components) > 0
 }
 
 // PolarizationEnabled returns whether Jones two-component simulation is on
@@ -71,6 +97,94 @@ type Plane struct {
 	Ey    []complex128
 	Ez    []complex128
 	Stats PlaneStats
+	// Wavelength and UnitKey identify the coherent unit whose field is stored
+	// in Ex/Ey (the strongest one when several units reach this plane).
+	Wavelength float64
+	UnitKey    string
+	// Parts carries the per-coherent-unit field, which is what makes
+	// multi-wavelength (colour) rendering and multi-source layouts possible:
+	// the units are mutually incoherent, so the total intensity is their sum.
+	Parts []PlanePart
+	// Merged is set when several incoherent units contributed to this plane;
+	// Ex/Ey/Ez then hold an amplitude proxy (Ex = sqrt(I_total)) instead of a
+	// physical field. See MergedUnits.
+	Merged bool
+}
+
+// PlanePart is one coherent unit's contribution to a plane. The units are
+// mutually incoherent, so the plane's total intensity is the sum over parts
+// and each part keeps its own complex field (Jones vector) — that is what
+// makes per-source colour, phase and polarization views possible.
+type PlanePart struct {
+	Source     int          `json:"source"`
+	Label      string       `json:"label"`
+	Wavelength float64      `json:"wavelength"`
+	Power      float64      `json:"power"`
+	Peak       float64      `json:"peak"`
+	Ex         []complex128 `json:"-"`
+	Ey         []complex128 `json:"-"`
+	Ez         []complex128 `json:"-"`
+}
+
+// Intensity returns the part's per-pixel intensity in W/m^2.
+func (pp *PlanePart) Intensity() []float64 {
+	out := make([]float64, len(pp.Ex))
+	for i := range pp.Ex {
+		out[i] = norm2c(pp.Ex[i])
+		if pp.Ey != nil {
+			out[i] += norm2c(pp.Ey[i])
+		}
+		if pp.Ez != nil {
+			out[i] += norm2c(pp.Ez[i])
+		}
+	}
+	return out
+}
+
+// Bytes estimates the retained memory of a part.
+func (pp *PlanePart) Bytes() int64 {
+	return int64(len(pp.Ex)+len(pp.Ey)+len(pp.Ez)) * 16
+}
+
+// Merged reports whether the plane combines several incoherent units. When it
+// does, the plane's own complex field is only an amplitude proxy for the total
+// intensity (Ex = sqrt(I), Ey = 0) and phase/polarization views must be taken
+// from a part instead.
+func (p *Plane) MergedUnits() bool { return p.Merged }
+
+// TotalIntensity returns the summed intensity of every contributing unit.
+func (p *Plane) TotalIntensity() []float64 {
+	if !p.Merged || len(p.Parts) == 0 {
+		return intensityOf(p)
+	}
+	out := make([]float64, p.Size*p.Size)
+	for i := range p.Parts {
+		pi := p.Parts[i]
+		if len(pi.Ex) != len(out) {
+			continue
+		}
+		for k := range pi.Ex {
+			out[k] += norm2c(pi.Ex[k])
+			if pi.Ey != nil {
+				out[k] += norm2c(pi.Ey[k])
+			}
+			if pi.Ez != nil {
+				out[k] += norm2c(pi.Ez[k])
+			}
+		}
+	}
+	return out
+}
+
+// DominantPart returns the index of the part carrying the most power.
+func (p *Plane) DominantPart() int {
+	best, bestP := 0, -1.0
+	for i := range p.Parts {
+		if p.Parts[i].Power > bestP {
+			best, bestP = i, p.Parts[i].Power
+		}
+	}
+	return best
 }
 
 // Result is the output of Simulate.
@@ -83,21 +197,28 @@ type Result struct {
 	ElapsedMS  float64
 	Warnings   []Warning
 	Planes     []*Plane
+	// Scene is the routed geometry of the light path (nil for element trains).
+	Scene *SceneTrace
 }
 
 // PlaneInfo is the lightweight JSON form of a plane (no field data).
 type PlaneInfo struct {
-	ID    string     `json:"id"`
-	Label string     `json:"label"`
-	Path  string     `json:"path"`
-	Size  int        `json:"size"`
-	DX    float64    `json:"dx"`
-	Stats PlaneStats `json:"stats"`
+	ID         string      `json:"id"`
+	Label      string      `json:"label"`
+	Path       string      `json:"path"`
+	Size       int         `json:"size"`
+	DX         float64     `json:"dx"`
+	Stats      PlaneStats  `json:"stats"`
+	Wavelength float64     `json:"wavelength,omitempty"`
+	Unit       string      `json:"unit,omitempty"`
+	Merged     bool        `json:"merged_units,omitempty"`
+	Parts      []PlanePart `json:"parts,omitempty"`
 }
 
 // Info converts a Plane to its JSON form.
 func (p *Plane) Info() PlaneInfo {
-	return PlaneInfo{ID: p.ID, Label: p.Label, Path: p.Path, Size: p.Size, DX: p.DX, Stats: p.Stats}
+	return PlaneInfo{ID: p.ID, Label: p.Label, Path: p.Path, Size: p.Size, DX: p.DX,
+		Stats: p.Stats, Wavelength: p.Wavelength, Unit: p.UnitKey, Merged: p.Merged, Parts: p.Parts}
 }
 
 // trainer runs one linear train (possibly with beam-splitter sub-arms).
@@ -123,12 +244,18 @@ func Simulate(cfg Config) (*Result, error) {
 	if err := CheckGridMemory(cfg.Grid.Size); err != nil {
 		return nil, err
 	}
+	if cfg.IsScene() {
+		return SimulateScene(cfg)
+	}
+	return simulateTrain(cfg)
+}
+
+// simulateTrain runs the legacy sequential element train. Multiple sources are
+// handled by simulating one coherent unit at a time (same coherent group and
+// wavelength) and adding the resulting intensities.
+func simulateTrain(cfg Config) (*Result, error) {
 	start := time.Now()
 	polarized := cfg.PolarizationEnabled()
-	f, err := BuildSource(cfg.Source, cfg.Grid.Size, cfg.Grid.Width, polarized, cfg.Wavelength)
-	if err != nil {
-		return nil, err
-	}
 	base := &Context{
 		Wavelength:         cfg.Wavelength,
 		Evanescent:         cfg.Evanescent,
@@ -141,9 +268,54 @@ func Simulate(cfg Config) (*Result, error) {
 	if base.Evanescent == "" {
 		base.Evanescent = "decay"
 	}
-	t := &trainer{cfg: &cfg, base: base, arms: map[string]*Field{}}
-	if err := t.runTrain(cfg.Elements, f, "", 0); err != nil {
-		return nil, err
+	sources := cfg.AllSources()
+	for i := range sources {
+		if sources[i].Type == "" {
+			sources[i].Type = "plane"
+		}
+	}
+	units := splitUnits(sources, cfg.Wavelength, base.Warnings)
+	var planes []*Plane
+	parts := map[string][]PlanePart{}
+	for _, u := range units {
+		wl := sources[u.sources[0]].EffectiveWavelength(cfg.Wavelength)
+		f, err := BuildUnitField(sources, u.sources, cfg.Grid.Size, cfg.Grid.Width, polarized, wl)
+		if err != nil {
+			return nil, err
+		}
+		// The kernel propagates and applies elements at this unit's
+		// wavelength, not at the configuration default.
+		uctx := *base
+		uctx.Wavelength = wl
+		t := &trainer{cfg: &cfg, base: &uctx, arms: map[string]*Field{}}
+		if err := t.runTrain(cfg.Elements, f, "", 0); err != nil {
+			return nil, err
+		}
+		unit := unitLabel(u.key.group, wl)
+		for _, pl := range t.pl {
+			pl.Wavelength = wl
+			pl.UnitKey = unit
+			parts[pl.ID] = append(parts[pl.ID], PlanePart{
+				Source: u.sources[0], Label: unit, Wavelength: wl,
+				Power: pl.Stats.Power, Peak: pl.Stats.Peak,
+				Ex: pl.Ex, Ey: pl.Ey, Ez: pl.Ez,
+			})
+		}
+		planes = mergeUnitPlanes(planes, t.pl)
+	}
+	finishPlanes(planes, parts)
+	// The element train is a sequence, not a layout: synthesize the equivalent
+	// positioned scene so the 3D view has something to show and old presets
+	// keep working.
+	var tr *SceneTrace
+	scene := LayoutFromElements(&cfg)
+	if scene != nil && len(scene.Components) > 0 {
+		var terr error
+		tr, terr = TraceScene(scene, sources, cfg.Wavelength)
+		if terr != nil {
+			base.Warnings.Add("layout", "无法为元件序列合成布局视图: "+terr.Error(), 0)
+			tr = nil
+		}
 	}
 	return &Result{
 		RunID:      randomID(),
@@ -153,8 +325,71 @@ func Simulate(cfg Config) (*Result, error) {
 		Wavelength: cfg.Wavelength,
 		ElapsedMS:  float64(time.Since(start).Microseconds()) / 1000,
 		Warnings:   base.Warnings.List(),
-		Planes:     t.pl,
+		Planes:     planes,
+		Scene:      tr,
 	}, nil
+}
+
+// finishPlanes attaches the per-unit parts to every plane and, when several
+// mutually incoherent units contributed, replaces the plane's complex field
+// with an amplitude proxy so every intensity consumer sees the true total.
+func finishPlanes(planes []*Plane, parts map[string][]PlanePart) {
+	for _, pl := range planes {
+		ps := parts[pl.ID]
+		pl.Parts = ps
+		if len(ps) <= 1 {
+			continue
+		}
+		pl.Merged = true
+		tot := pl.TotalIntensity()
+		proxy := &Field{N: pl.Size, DX: pl.DX, Ex: make([]complex128, len(tot))}
+		min, max := math.Inf(1), 0.0
+		for i, v := range tot {
+			if v > 0 {
+				proxy.Ex[i] = complex(math.Sqrt(v), 0)
+			}
+			if v < min {
+				min = v
+			}
+			if v > max {
+				max = v
+			}
+		}
+		pl.Ex, pl.Ey, pl.Ez = proxy.Ex, nil, nil
+		// Every statistic must describe the *total* intensity of the merged
+		// plane: they used to come from a single unit while the field held
+		// another, so the centroid and spot radii disagreed with the power.
+		strehl, phMin, phMax := pl.Stats.Strehl, pl.Stats.PhaseMin, pl.Stats.PhaseMax
+		pl.Stats = ComputeStats(proxy, pl.Wavelength, 0, 0)
+		pl.Stats.Strehl, pl.Stats.PhaseMin, pl.Stats.PhaseMax = strehl, phMin, phMax
+		pl.Stats.Peak = max
+		pl.Stats.IntensityMin, pl.Stats.IntensityMax = min, max
+	}
+}
+
+// BuildUnitField sums the fields of one coherent unit's sources on the grid.
+func BuildUnitField(sources []SourceSpec, idx []int, size int, width float64, polarized bool, wl float64) (*Field, error) {
+	var sum *Field
+	for _, si := range idx {
+		f, err := BuildSource(sources[si], size, width, polarized, wl)
+		if err != nil {
+			return nil, fmt.Errorf("source %d: %v", si, err)
+		}
+		if sum == nil {
+			sum = f
+			continue
+		}
+		for i := range sum.Ex {
+			sum.Ex[i] += f.Ex[i]
+			if polarized {
+				sum.Ey[i] += f.Ey[i]
+			}
+		}
+	}
+	if sum == nil {
+		return nil, fmt.Errorf("no sources")
+	}
+	return sum, nil
 }
 
 // runTrain evaluates one element train on field f.

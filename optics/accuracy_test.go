@@ -409,7 +409,7 @@ func TestMichelsonBalancedArms(t *testing.T) {
 	if pDet > 1e-4 {
 		t.Fatalf("balanced Michelson detector power %g W, want ~0", pDet)
 	}
-	if rel := math.Abs(pSrc - 1e-3) / 1e-3; rel > 0.01 {
+	if rel := math.Abs(pSrc-1e-3) / 1e-3; rel > 0.01 {
 		t.Fatalf("balanced Michelson source-port power %g W, want 1e-3", pSrc)
 	}
 }

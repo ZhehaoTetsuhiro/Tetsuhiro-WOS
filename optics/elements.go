@@ -185,161 +185,31 @@ func (e *lensEl) Apply(f *Field, ctx *Context) error {
 // ---- apertures -------------------------------------------------------------
 
 type apertureEl struct {
-	shape      string
-	radius     float64
-	width      float64
-	height     float64
-	a          float64
-	b          float64
-	order      float64
-	rin        float64
-	rout       float64
-	sides      int
-	points     int
-	inner      float64
-	length     float64
-	rotation   float64
-	separation float64
-	x0, y0     float64
-	edgeSigma  float64
-
-	// verts holds precomputed polygon vertices for triangle/polygon/star/custom.
-	verts [][2]float64
+	geom   *shapeGeom
+	x0, y0 float64
 }
 
 func newAperture(p map[string]any) (Element, error) {
-	e := &apertureEl{
-		shape:      ps(p, "shape", "circle"),
-		radius:     pfd(p, "radius", 0.001),
-		width:      pfd(p, "width", 0.002),
-		height:     pfd(p, "height", 0.002),
-		a:          pfd(p, "a", 0.001),
-		b:          pfd(p, "b", 0.002),
-		order:      pfd(p, "order", 2),
-		rin:        pfd(p, "rin", 0.0005),
-		rout:       pfd(p, "rout", 0.001),
-		sides:      pi_(p, "sides", 6),
-		points:     pi_(p, "points", 5),
-		inner:      pfd(p, "inner", 0.0005),
-		length:     pfd(p, "length", 0.004),
-		rotation:   pfd(p, "rotation", 0),
-		separation: pfd(p, "separation", 0.001),
-		x0:         pfd(p, "x", 0),
-		y0:         pfd(p, "y", 0),
-		edgeSigma:  pfd(p, "edge_sigma", 0),
+	g, err := parseShapeGeom(ps(p, "shape", "circle"), p)
+	if err != nil {
+		return nil, fmt.Errorf("aperture: %v", strings.TrimPrefix(err.Error(), "shape: "))
 	}
-	switch e.shape {
-	case "circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "custom":
-	default:
-		return nil, fmt.Errorf("aperture: unknown shape %q", e.shape)
-	}
-	switch e.shape {
-	case "circle":
-		if e.radius <= 0 {
-			return nil, fmt.Errorf("aperture: circle radius must be > 0")
-		}
-	case "square":
-		if e.width <= 0 {
-			return nil, fmt.Errorf("aperture: square width must be > 0")
-		}
-	case "rectangle":
-		if e.width <= 0 || e.height <= 0 {
-			return nil, fmt.Errorf("aperture: rectangle width and height must be > 0")
-		}
-	case "ellipse":
-		if e.a <= 0 || e.b <= 0 {
-			return nil, fmt.Errorf("aperture: ellipse a and b must be > 0")
-		}
-	case "superellipse":
-		if e.a <= 0 || e.b <= 0 || e.order < 0.1 {
-			return nil, fmt.Errorf("aperture: superellipse a,b > 0 and order >= 0.1")
-		}
-	case "triangle":
-		if e.radius <= 0 {
-			return nil, fmt.Errorf("aperture: triangle radius must be > 0")
-		}
-		e.verts = regularPolygonVertices(3, e.radius, math.Pi/2)
-	case "ring":
-		if e.rout <= 0 || e.rin < 0 || e.rin >= e.rout {
-			return nil, fmt.Errorf("aperture: ring requires 0 <= rin < rout")
-		}
-	case "polygon":
-		if e.radius <= 0 {
-			return nil, fmt.Errorf("aperture: polygon radius must be > 0")
-		}
-		if e.sides < 3 {
-			return nil, fmt.Errorf("aperture: polygon sides must be >= 3")
-		}
-		e.verts = regularPolygonVertices(e.sides, e.radius, math.Pi/float64(e.sides))
-	case "double_slit":
-		if e.width <= 0 || e.height <= 0 || e.separation <= 0 {
-			return nil, fmt.Errorf("aperture: double_slit width/height/separation must be > 0")
-		}
-	case "cross":
-		if e.width <= 0 || e.length <= 0 {
-			return nil, fmt.Errorf("aperture: cross width and length must be > 0")
-		}
-	case "star":
-		if e.radius <= 0 || e.inner <= 0 || e.inner >= e.radius {
-			return nil, fmt.Errorf("aperture: star requires 0 < inner < radius")
-		}
-		if e.points < 3 {
-			return nil, fmt.Errorf("aperture: star points must be >= 3")
-		}
-		e.verts = starVertices(e.points, e.radius, e.inner, math.Pi/2)
-	case "custom":
-		vs, err := parseVertices(ps(p, "vertices", ""))
-		if err != nil {
-			return nil, err
-		}
-		e.verts = vs
-	}
-	return e, nil
+	return &apertureEl{geom: g, x0: pfd(p, "x", 0), y0: pfd(p, "y", 0)}, nil
 }
 
 func (e *apertureEl) Apply(f *Field, ctx *Context) error {
 	n := f.N
-	rot := e.rotation
-	cr, sr := math.Cos(rot), math.Sin(rot)
-	sig := e.edgeSigma
+	g := e.geom
+	sig := g.edgeSigma
 	for j := 0; j < n; j++ {
 		dy := f.Y(j) - e.y0
 		for i := 0; i < n; i++ {
 			dx := f.X(i) - e.x0
-			u := cr*dx + sr*dy
-			v := -sr*dx + cr*dy
-			var d float64
-			switch e.shape {
-			case "circle":
-				d = e.radius - math.Hypot(dx, dy)
-			case "square":
-				d = math.Min(e.width/2-math.Abs(u), e.width/2-math.Abs(v))
-			case "rectangle":
-				d = math.Min(e.width/2-math.Abs(u), e.height/2-math.Abs(v))
-			case "ellipse":
-				d = (1 - math.Hypot(u/e.a, v/e.b)) * math.Min(e.a, e.b)
-			case "triangle", "polygon", "star", "custom":
-				d = polygonSignedDistance(e.verts, u, v)
-			case "ring":
-				r := math.Hypot(dx, dy)
-				d = math.Min(r-e.rin, e.rout-r)
-			case "double_slit":
-				d1 := math.Min(e.height/2-math.Abs(v), e.width/2-math.Abs(u-e.separation/2))
-				d2 := math.Min(e.height/2-math.Abs(v), e.width/2-math.Abs(u+e.separation/2))
-				d = math.Max(d1, d2)
-			case "cross":
-				hw := e.width / 2
-				hl := e.length / 2
-				d = math.Max(math.Min(hw-math.Abs(u), hl-math.Abs(v)), math.Min(hl-math.Abs(u), hw-math.Abs(v)))
-			case "superellipse":
-				rn := math.Pow(math.Abs(u)/e.a, e.order) + math.Pow(math.Abs(v)/e.b, e.order)
-				d = (1 - rn) * math.Min(e.a, e.b)
-			}
 			var t complex128
 			if sig > 0 {
-				t = smoothStep(d, sig)
+				t = smoothStep(g.signedDistance(dx, dy), sig)
 			} else {
-				t = step(d)
+				t = step(g.signedDistance(dx, dy))
 			}
 			idx := j*n + i
 			f.Ex[idx] *= t

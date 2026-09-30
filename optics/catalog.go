@@ -1,5 +1,10 @@
 package optics
 
+import (
+	"math"
+	"strings"
+)
+
 // ParamSpec describes one adjustable parameter of an element, source, or
 // global setting. The web GUI renders a keyboard-operable control for every
 // entry in this catalog, so new parameters appear automatically.
@@ -21,12 +26,108 @@ type ParamSpec struct {
 	ShowIf string `json:"show_if,omitempty"`
 }
 
+// ShapeDoc documents one clear-aperture outline: the shape vocabulary shared by
+// the aperture element and by scene components.
+type ShapeDoc struct {
+	Kind   string      `json:"kind"`
+	Label  string      `json:"label"`
+	Params []ParamSpec `json:"params"`
+}
+
+// shapeLabels names each outline kind.
+var shapeLabels = map[string]string{
+	"circle": "圆孔", "square": "方孔", "rectangle": "矩孔", "ellipse": "椭圆孔",
+	"triangle": "三角孔", "ring": "环形孔", "polygon": "多边形孔", "double_slit": "双缝",
+	"cross": "十字孔", "star": "星形孔", "superellipse": "超椭圆孔", "custom": "自定义孔",
+	"slit": "狭缝",
+}
+
+// ShapeDocs derives the outline documentation from the aperture element so the
+// two cannot drift apart: each aperture parameter is assigned to the kinds its
+// show_if condition names.
+func ShapeDocs() []ShapeDoc {
+	var ap *ElementDoc
+	for i := range ElementDocs {
+		if ElementDocs[i].Type == "aperture" {
+			ap = &ElementDocs[i]
+			break
+		}
+	}
+	perKind := map[string][]ParamSpec{}
+	if ap != nil {
+		for _, p := range ap.Params {
+			switch p.Key {
+			case "shape", "x", "y", "aperture":
+				continue
+			}
+			for _, k := range shapeKindsOf(p.ShowIf) {
+				perKind[k] = append(perKind[k], p)
+			}
+		}
+	}
+	out := make([]ShapeDoc, 0, len(ShapeKinds))
+	for _, k := range ShapeKinds {
+		d := ShapeDoc{Kind: k, Label: shapeLabels[k], Params: perKind[k]}
+		if k == "custom" {
+			d.Params = []ParamSpec{{Key: "vertices", Label: "顶点列表", Kind: "text",
+				Default: "0,-0.001;0.001,0.001;-0.001,0.001",
+				Help:    "分号分隔的顶点 u,v（米），按顺序连成闭合多边形"}}
+		}
+		if k == "slit" {
+			d.Params = []ParamSpec{
+				fp("width", "缝宽", "m", 1e-6, 0.05, 1e-4, 1e-4, "沿 u 方向"),
+				fp("height", "缝高", "m", 1e-6, 0.05, 1e-4, 2e-2, "沿 v 方向"),
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// shapeKindsOf extracts the kind list from a "shape=k1|k2" show_if condition.
+func shapeKindsOf(showIf string) []string {
+	for _, term := range strings.Split(showIf, ",") {
+		term = strings.TrimSpace(term)
+		if !strings.HasPrefix(term, "shape=") {
+			continue
+		}
+		var out []string
+		for _, k := range strings.Split(strings.TrimPrefix(term, "shape="), "|") {
+			if k = strings.TrimSpace(k); k != "" {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 // ElementDoc documents one element (or source) type for the catalog API.
 type ElementDoc struct {
 	Type   string      `json:"type"`
 	Label  string      `json:"label"`
 	Help   string      `json:"help"`
 	Params []ParamSpec `json:"params"`
+}
+
+// sourceDocFor returns the catalog entry of a source type, or nil.
+func sourceDocFor(t string) *ElementDoc {
+	for i := range SourceDocs {
+		if SourceDocs[i].Type == t {
+			return &SourceDocs[i]
+		}
+	}
+	return nil
+}
+
+// elementDocFor returns the catalog entry of an element type, or nil.
+func elementDocFor(t string) *ElementDoc {
+	for i := range ElementDocs {
+		if ElementDocs[i].Type == t {
+			return &ElementDocs[i]
+		}
+	}
+	return nil
 }
 
 func fp(key, label, unit string, min, max, step, def float64, help string) ParamSpec {
@@ -141,12 +242,12 @@ var ElementDocs = []ElementDoc{
 		}},
 	{Type: "aperture", Label: "孔径光阑", Help: "透射孔径：圆孔/方孔/矩孔/椭圆孔/三角孔/环形/多边形/双缝/十字/星形/超椭圆，亦可用顶点列表自定义；切换形状后仅显示该形状对应的参数。",
 		Params: []ParamSpec{
-			cp("shape", "形状", []string{"circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "custom"}, "circle", "选择孔径形状；不同形状显示不同的参数"),
+			cp("shape", "形状", []string{"circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "slit", "custom"}, "circle", "选择孔径形状；不同形状显示不同的参数"),
 			// 圆孔 / 三角孔 / 多边形 / 星形共用外接圆半径
 			showIf(fp("radius", "半径", "m", 1e-6, 0.05, 1e-4, 1e-3, "circle/triangle/polygon/star：外接圆半径"), "shape=circle|triangle|polygon|star"),
 			// 方孔 / 矩孔 / 双缝 / 十字共用宽度
 			showIf(fp("width", "宽度", "m", 1e-6, 0.05, 1e-4, 2e-3, "square=边长；rectangle/double_slit/cross=沿 u 方向的宽度"), "shape=square|rectangle|double_slit|cross"),
-			showIf(fp("height", "高度", "m", 1e-6, 0.05, 1e-4, 2e-3, "rectangle/double_slit：沿 v 方向"), "shape=rectangle|double_slit"),
+			showIf(fp("height", "高度", "m", 1e-6, 0.05, 1e-4, 2e-3, "rectangle/double_slit/slit：沿 v 方向"), "shape=rectangle|double_slit|slit"),
 			// 椭圆 / 超椭圆共用半轴
 			showIf(fp("a", "半轴 a", "m", 1e-6, 0.05, 1e-4, 1e-3, "ellipse/superellipse：沿 u 方向半轴"), "shape=ellipse|superellipse"),
 			showIf(fp("b", "半轴 b", "m", 1e-6, 0.05, 1e-4, 2e-3, "ellipse/superellipse：沿 v 方向半轴"), "shape=ellipse|superellipse"),
@@ -338,11 +439,14 @@ type Example struct {
 	Config Config `json:"config"`
 }
 
-// Examples returns the built-in preset configurations.
+// Examples returns the built-in preset configurations. The first entries are
+// positioned scenes (components carry a place on the table); the later ones are
+// legacy element trains, which remain supported and are shown in the layout
+// view through a synthesized scene.
 func Examples() []Example {
 	bl := &BandlimitOpts{Fraction: 0.9, Sigma: 0.05}
 	pf2 := func(b bool) *bool { return &b }
-	ex := []Example{
+	ex := append(sceneExamples(bl), []Example{
 		{Name: "高斯光束传播", Config: Config{
 			Grid: GridSpec{Size: 1024, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
 			Method: "asm", Evanescent: "decay", Bandlimit: bl,
@@ -500,14 +604,128 @@ func Examples() []Example {
 				{Type: "sensor", Params: map[string]any{"label": "像差焦斑", "strehl_aperture": 0.003, "strehl_distance": 0.3}},
 			},
 		}},
-	}
+	}...)
 	return ex
+}
+
+// sceneExamples returns the built-in positioned-scene presets: every component
+// has a place and an outline, the light path is derived from the geometry.
+func sceneExamples(bl *BandlimitOpts) []Example {
+	pf := func(b bool) *bool { return &b }
+	pos := func(x, y, z float64) *Vec3 { return &Vec3{X: x, Y: y, Z: z} }
+	dir := func(x, y, z float64) *Vec3 { return &Vec3{X: x, Y: y, Z: z} }
+	base := func(size int, width float64, pol bool) Config {
+		return Config{
+			Grid: GridSpec{Size: size, Width: width}, Wavelength: 632.8e-9, Polarized: pf(pol),
+			Method: "asm", Evanescent: "decay", Bandlimit: bl,
+		}
+	}
+	// ---- Michelson interferometer -------------------------------------------
+	mi := base(512, 0.01, false)
+	mi.Sources = []SourceSpec{{
+		ID: "src", Label: "HeNe 光源", Type: "gaussian", Pos: pos(0, 0, -0.15), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 2e-3, "power": 1e-3},
+	}}
+	mi.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "bs", Type: "beamsplitter", Label: "分束器", Pos: v3(0, 0, 0), Yaw: -math.Pi / 4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 0.5}},
+		{ID: "m1", Type: "mirror", Label: "端镜 A", Pos: v3(0, 0, 0.1), Yaw: 0,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 1.0}},
+		// A 0.5 mrad yaw offset on the second end mirror tilts the returning
+		// wavefront, which is what makes the classic wedge fringes appear.
+		{ID: "m2", Type: "mirror", Label: "端镜 B（微倾）", Pos: v3(0.1, 0, 0), Yaw: math.Pi/2 + 5e-4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 1.0}},
+		{ID: "d1", Type: "sensor", Label: "探测器（回光源端口）", Pos: v3(0, 0, -0.05), Yaw: 0,
+			Shape: CircleOutline(5e-3)},
+		{ID: "d2", Type: "sensor", Label: "侧向端口", Pos: v3(-0.05, 0, 0), Yaw: math.Pi / 2,
+			Shape: CircleOutline(5e-3)},
+	}}
+
+	// ---- Mach-Zehnder interferometer ---------------------------------------
+	mz := base(512, 0.012, false)
+	mz.Sources = []SourceSpec{{
+		ID: "src", Label: "HeNe 光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	mz.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "bs1", Type: "beamsplitter", Label: "分束器 1", Pos: v3(0, 0, 0), Yaw: -math.Pi / 4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 0.5}},
+		{ID: "m1", Type: "mirror", Label: "折转镜 A", Pos: v3(0, 0, 0.1), Yaw: -math.Pi / 4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 1.0}},
+		{ID: "m2", Type: "mirror", Label: "折转镜 B", Pos: v3(0.1, 0, 0), Yaw: 3 * math.Pi / 4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 1.0}},
+		{ID: "bs2", Type: "beamsplitter", Label: "合束器", Pos: v3(0.1, 0, 0.1), Yaw: -math.Pi / 4,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"reflectivity": 0.5}},
+		{ID: "d1", Type: "sensor", Label: "端口 1", Pos: v3(0.1, 0, 0.2), Yaw: math.Pi,
+			Shape: CircleOutline(5e-3)},
+		{ID: "d2", Type: "sensor", Label: "端口 2", Pos: v3(0.2, 0, 0.1), Yaw: -math.Pi / 2,
+			Shape: CircleOutline(5e-3)},
+	}}
+
+	// ---- two sources: coherent fringes and two colours ----------------------
+	ts := base(512, 0.02, false)
+	ts.Sources = []SourceSpec{
+		{ID: "s1", Label: "红光（组 A，+倾斜）", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+			Group: "A", Params: map[string]any{"power": 5e-4, "tilt_x": 1e-4}},
+		{ID: "s2", Label: "红光（组 A，-倾斜）", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+			Group: "A", Params: map[string]any{"power": 5e-4, "tilt_x": -1e-4}},
+		{ID: "s3", Label: "绿光（独立光源）", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+			Wavelength: 532e-9, Params: map[string]any{"power": 5e-4}},
+	}
+	ts.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "slit", Type: "aperture", Label: "双缝", Pos: v3(0, 0, 0),
+			Shape:  &ShapeSpec{Kind: "double_slit", Params: map[string]any{"width": 1e-4, "height": 1e-2, "separation": 1e-3}},
+			Params: map[string]any{}},
+		{ID: "det", Type: "sensor", Label: "观察屏", Pos: v3(0, 0, 0.5), Yaw: math.Pi,
+			Shape: CircleOutline(9e-3)},
+	}}
+
+	// ---- polarization and phase --------------------------------------------
+	pol := base(512, 0.01, true)
+	pol.Sources = []SourceSpec{{
+		ID: "src", Label: "45° 线偏振光源", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 2e-3, "power": 1e-3, "polarization": "d"},
+	}}
+	pol.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "lens", Type: "lens", Label: "聚焦透镜", Pos: v3(0, 0, 0), Shape: CircleOutline(3e-3),
+			Params: map[string]any{"f": 0.3}},
+		{ID: "pol", Type: "polarizer", Label: "偏振片 45°", Pos: v3(0, 0, 0.05), Shape: CircleOutline(4e-3),
+			Params: map[string]any{"angle": math.Pi / 4}},
+		{ID: "qwp", Type: "retarder", Label: "四分之一波片", Pos: v3(0, 0, 0.1), Shape: CircleOutline(4e-3),
+			Params: map[string]any{"retardance": math.Pi / 2, "axis": 0}},
+		{ID: "det", Type: "sensor", Label: "焦面", Pos: v3(0, 0, 0.3), Yaw: math.Pi,
+			Shape: CircleOutline(6e-3), Params: map[string]any{"strehl_aperture": 3e-3, "strehl_distance": 0.3}},
+	}}
+
+	// ---- straight relay: the simplest positioned layout --------------------
+	line := base(512, 0.01, false)
+	line.Sources = []SourceSpec{{
+		ID: "src", Label: "高斯光源", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 1e-3, "power": 1e-3},
+	}}
+	line.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "ap", Type: "aperture", Label: "光阑", Pos: v3(0, 0, 0), Shape: CircleOutline(2e-3),
+			Params: map[string]any{}},
+		{ID: "lens", Type: "lens", Label: "透镜", Pos: v3(0, 0, 0.05), Shape: CircleOutline(4e-3),
+			Params: map[string]any{"f": 0.5}},
+		{ID: "det", Type: "sensor", Label: "焦面", Pos: v3(0, 0, 0.55), Yaw: math.Pi,
+			Shape: CircleOutline(5e-3), Params: map[string]any{"strehl_aperture": 2e-3, "strehl_distance": 0.5}},
+	}}
+
+	return []Example{
+		{Name: "迈克尔逊干涉仪（定位元件）", Config: mi},
+		{Name: "马赫-曾德尔干涉仪（定位元件）", Config: mz},
+		{Name: "双光源：相干条纹与双波长颜色", Config: ts},
+		{Name: "偏振与相位：线偏振→波片→焦面", Config: pol},
+		{Name: "直线光路：光阑+透镜聚焦", Config: line},
+	}
 }
 
 // Catalog is the full documentation payload served to the GUI.
 type Catalog struct {
 	Sources       []ElementDoc   `json:"sources"`
 	Elements      []ElementDoc   `json:"elements"`
+	Shapes        []ShapeDoc     `json:"shapes"`
 	Methods       []any          `json:"methods"`
 	Polarizations []any          `json:"polarizations"`
 	Quantum       QuantumCatalog `json:"quantum"`
@@ -589,7 +807,8 @@ func BuildQuantumCatalog() QuantumCatalog {
 
 // BuildCatalog assembles the catalog document.
 func BuildCatalog() Catalog {
-	cat := Catalog{Sources: SourceDocs, Elements: ElementDocs, Quantum: BuildQuantumCatalog(), Examples: Examples()}
+	cat := Catalog{Sources: SourceDocs, Elements: ElementDocs, Shapes: ShapeDocs(),
+		Quantum: BuildQuantumCatalog(), Examples: Examples()}
 	for _, m := range MethodDocs {
 		cat.Methods = append(cat.Methods, map[string]string{"key": m.Key, "label": m.Label, "help": m.Help})
 	}

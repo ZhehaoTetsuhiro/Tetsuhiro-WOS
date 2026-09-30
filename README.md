@@ -6,17 +6,22 @@
 - **高级传播算法**：**全矢量角谱法**（`method=vectorial`，重构纵向分量 Ez，非傍轴）、**非均匀/复折射率介质**（split-step BPM，分层/梯度/吸收/增益介质）、**宽带谱叠加**（polychromatic，逐波长非相干叠加）、**部分相干光**（Gaussian Schell 模型）、**各向异性/双折射介质**（单轴晶体 `uniaxial`、Berreman 4×4 双轴晶体 `biaxial`）、**3-D 体传播**（一次传播到多个 z，输出 x,y,z 体积场）。
 - **光学元件**：20+ 种可调参数元件（透镜、光阑、光栅、轴锥镜、波带片、涡旋相位板、楔形棱镜、漫射体、反射镜、凹面镜、凸面镜、泽尼克像差板、偏振片、波片、旋光片、自定义琼斯矩阵、分束器、合束器、单轴晶体、均匀介质、双轴晶体……），全部参数可调。
 - **量子光学**：Fock 基线性光学内核（Fock/相干/压缩/双模压缩/热态、相移/分束器/位移/压缩/损耗门），光子数分布、g²(0)、正交分量、联合分布——Hong-Ou-Mandel、单光子马赫-曾德尔、压缩、EPR、混合态/损耗等效应可复现，并支持 PNG/SVG 图表导出（docs/QUANTUM.md）。
+- **定位场景光路（1.0 光路模型）**：光路存储**元件的位置与几何形状**（`scene.components[]`：pos/yaw/pitch/roll/shape/params），而非“依次经过的元件序列”；光路由最近命中与反射/透射几何**推导**，元件顺序由位置决定。元件带真实轮廓（圆/方/矩形/椭圆/三角/环/多边形/双缝/十字/星形/超椭圆/自定义顶点/细缝），轮廓即通光孔径。旧的元件序列配置可一键自动转换为定位场景（`POST /api/convert`，GUI 载入旧预设时自动完成）。
+- **多光源与相干分组**：`sources[]` 任意多个光源，各有位置/方向/波长/功率/偏振与相干组；同组同波长相干叠加（产生干涉条纹），不同组/不同波长按强度叠加；每个平面保留各光源单元的复场，可按通道单独查看。
+- **真实光色与明暗**：波长→线性 sRGB（CIE 1931 拟合），颜色视图按各光源波长加权着色、亮度为真实强度（可调曝光），曲线（剖面）同时保留。
+- **偏振与相位检查**：斯托克斯参数、偏振椭圆（ψ/χ/轴比/手性）、偏振度、二维相位去包裹与波前 PV/RMS；偏振视图叠加椭圆阵列，**点击**图像上任意一点即在下方展开该点的琼斯矢量、斯托克斯参数与相位；无光区域自动掩膜。
+- **立体视图**：整套光路的三维渲染（元件板、光束段按光源颜色与相对功率、遮挡显示、平台网格），可旋转/缩放/平移复位。
 - **物理完备性**：琼斯矢量偏振（2 分量）、全矢量 Ez（3 分量）、折返光路（反射镜/迈克尔逊）、分束臂与相干合束（马赫-曾德尔等干涉仪）、功率归一化（SI 单位）、质心/RMS/Strehl 等指标、一维剖面。
-- **精度验证**：`go test ./optics/` 内含 77 项物理与数值测试——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
-- **GUI**：浏览器页面，**鼠标与键盘双可用**（Tab/方向键/快捷键，见 docs/GUI.md）；支持 n 新建、o 打开、s 保存配置 JSON 文件、m 切换量子光学模式、h 隐藏中心图样、自定义网格大小、毛玻璃视觉主题。
+- **精度验证**：`go test ./optics/` 内含 88 项物理与数值测试（含 18 个内置模板的端到端测试）——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
+- **GUI**：浏览器页面，**鼠标与键盘双可用**（Tab/方向键/快捷键，见 docs/GUI.md）；视图标签条 1 颜色 / 2 相位 / 3 偏振 / 4-6 各分量强度 / 7-8 分量相位 / **0 立体视图**，浏览器标签页带自制图标（淡蓝底 + 白色光栅衍射强度曲线），内置 18 个模板，支持 n 新建、o 打开、s 保存配置 JSON 文件、m 切换量子光学模式、h 隐藏中心图样、自定义网格大小、毛玻璃视觉主题。
 - **接入**：内核即库（import "twos/optics"），HTTP API 供任意语言调用。详见 docs/INTEGRATION.md（以内核开发为主）。
 
 ## 下载与安装
 
 本项目分两个发布通道：
 
-- **Release**（`v0.3.3`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3`，`docker/podman run` 直接运行。
+- **Release**（`v1.0.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.0`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -27,24 +32,24 @@
 
 容器镜像：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3
-    docker run -p 8080:8080 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v0.3.3
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.0
+    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.0
 
 ## 快速开始
 
     go build -o wos ./cmd/wos
-    ./wos -addr :8080        # 打开 http://localhost:8080（按 ? 查看快捷键）
+    ./wos -addr :1120        # 打开 http://localhost:1120（按 ? 查看快捷键）
 
 > 构建缓存异常时：GOCACHE=$PWD/.gocache go build -o wos ./cmd/wos
 > Windows 交叉编译：GOOS=windows GOARCH=amd64 go build -o wos.exe ./cmd/wos
 
 运行精度测试套件：
 
-    go test ./optics/ -v        # 77 项物理与数值测试
+    go test ./optics/ -v        # 88 项物理与数值测试
     go run ./examples/demo      # 内核库用法：透镜聚焦，输出 PNG 与指标
     go run ./examples/interferometer
     go run ./examples/quantum   # 量子光学：HOM / 相干 / 压缩 / EPR
-    python3 examples/python_client.py http://localhost:8080
+    python3 examples/python_client.py http://localhost:1120
 
 ## 目录结构
 
