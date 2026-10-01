@@ -2,6 +2,13 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.2] - 2026-10-01
+
+### 修复
+- **「衍射光栅光谱」模板只显示几个离散的点**：单一波长经光栅衍射本来就是点（0、±1、±2 级），也就是激光 + 光栅的真实结果——问题在模板缺少色散，不是内核错误。模板现在携带 **7 个波长**（405/450/500/550/600/650/700 nm，各 1/7 功率、互不相干的单元），每一级被拉开成 f·Δλ/Λ = 0.89 mm 的彩色光谱条（蓝端 1.215 mm → 红端 2.10 mm），0 级仍是各波长重合的那个点。回归测试 `TestExampleGratingSpectrumOrders` 改为逐波长核对：级次位置（±2 px 内）、2% 门限以上的峰恰好是 0 级 + 7 对 ±1 级、红端之外是暗区、每级积分权重 (J1/J0)²/7（7 个波长的均值误差 1.2%）、各单元功率相等（<0.05%）与探测器功率守恒。
+- **左栏「相干组」输入框冲出面板 74 px**（并让整个侧栏出现横向滚动条）：`.prow` 里的 `<input type="text">` 没设 `min-width: 0`，表单控件会按本征宽度（约 20 字符）撑开，无法随栏宽收缩；同组的数字输入也各溢出 1 px。现在两类输入都能收缩（`style.css`），占位提示缩短为「留空 = 独立光源」（完整说明仍在悬停提示里）。
+- **`Plane.ProfileOf` 在合并了多个互不相干单元的平面上 panic**（Go API，`optics/metrics.go`）：多波长/多光源运行会把平面折叠成 `Ex = sqrt(I_total)` 的振幅代理，且不再带 `Ey`；`ProfileOf` 原先无条件索引 `p.Ey`，于是 `index out of range [...] with length 0`。现在与 `Ez` 一样先判空。新增回归测试 `TestProfileOfMergedPlaneUnits`（旧代码下 panic，现已通过）。GUI 与 HTTP 走的是 `server/views.go` 的 `profileOfValues`，所以此前没被暴露，但库调用方（包括模板回归测试）会撞上。
+
 ## [v1.0.1] - 2026-10-01
 
 ### 修复
@@ -210,7 +217,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...HEAD
+[v1.0.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...v1.0.0
 [v0.3.3]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.2...v0.3.3

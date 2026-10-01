@@ -560,11 +560,27 @@ func sceneExamples(bl *BandlimitOpts) []Example {
 	// pattern, and the far-field spot λz/D = 79 µm is unresolvable once the
 	// window is the aperture. A lens maps the orders to the focal plane at
 	// f·λ/Λ, where they are both inside the window and resolved.
+	//
+	// A single monochromatic wave gives one point per order — that is what a
+	// laser and a grating really do — so the preset carries seven wavelengths
+	// (405…700 nm, 1/7 of the power each, independent units) and every order
+	// is drawn out into a coloured strip: f·(λmax−λmin)/Λ = 0.89 mm wide, blue
+	// at 1.215 mm, red at 2.10 mm.
 	gs := base(1024, 0.008, false)
-	gs.Sources = []SourceSpec{{
-		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
-		Params: map[string]any{"power": 1e-3},
-	}}
+	for _, w := range []struct {
+		id, label string
+		nm        float64
+	}{
+		{"src405", "405 nm", 405}, {"src450", "450 nm", 450}, {"src500", "500 nm", 500},
+		{"src550", "550 nm", 550}, {"src600", "600 nm", 600}, {"src650", "650 nm", 650},
+		{"src700", "700 nm", 700},
+	} {
+		gs.Sources = append(gs.Sources, SourceSpec{
+			ID: w.id, Label: w.label, Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+			Wavelength: w.nm * 1e-9,
+			Params:     map[string]any{"power": 1e-3 / 7},
+		})
+	}
 	gs.Scene = &SceneSpec{Components: []ComponentSpec{
 		{ID: "grating", Type: "grating", Label: "衍射光栅", Pos: v3(0, 0, 0),
 			Params: map[string]any{"kind": "phase_sin", "period": 1e-4, "modulation": 2.0}},

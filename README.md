@@ -12,7 +12,7 @@
 - **偏振与相位检查**：斯托克斯参数、偏振椭圆（ψ/χ/轴比/手性）、偏振度、二维相位去包裹与波前 PV/RMS；偏振视图叠加椭圆阵列，**点击**图像上任意一点即在下方展开该点的琼斯矢量、斯托克斯参数与相位；无光区域自动掩膜。
 - **立体视图**：整套光路的三维渲染（元件板、光束段按光源颜色与相对功率、遮挡显示、平台网格），可旋转/缩放/平移复位。
 - **物理完备性**：琼斯矢量偏振（2 分量）、全矢量 Ez（3 分量）、折返光路（反射镜/迈克尔逊）、分束臂与相干合束（马赫-曾德尔等干涉仪）、功率归一化（SI 单位）、质心/RMS/Strehl 等指标、一维剖面。
-- **精度验证**：`go test ./optics/` 内含 113 项物理与数值测试（含 16 个内置模板的端到端测试）——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
+- **精度验证**：`go test ./optics/` 内含 114 项物理与数值测试（含 16 个内置模板的端到端测试）——艾里斑峰值与暗环、单缝 sinc²、光栅 Raman-Nath 级数、双缝条纹、高斯束腰演化与 Gouy 相位、琼斯计算、马赫-曾德尔/迈克尔逊干涉能量守恒、波带片效率、散斑对比度、功率守恒、Fresnel/ASM 互证、ASM 高精度变体、复场级解析解对比（倾斜平面波/Fresnel-Gaussian/夫琅禾费远场/矢量 Ez）、双折射/Berreman、部分相干、宽带谱、HOM/相干/压缩/Fock 量子统计等。
 - **GUI**：浏览器页面，**鼠标与键盘双可用**（Tab/方向键/快捷键，见 docs/GUI.md）；视图标签条 1 图像 / 2 相位 / 3 偏振 / 4-6 各分量强度 / 7-8 分量相位 / **0 立体视图**，浏览器标签页带自制图标（淡蓝底 + 白色光栅衍射强度曲线），内置 16 个模板，支持 n 新建、o 打开、s 保存配置 JSON 文件、m 切换量子光学模式、h 隐藏中心图样、自定义网格大小、毛玻璃视觉主题。
 - **接入**：内核即库（import "twos/optics"），HTTP API 供任意语言调用。详见 docs/INTEGRATION.md（以内核开发为主）。
 
@@ -20,8 +20,8 @@
 
 本项目分两个发布通道：
 
-- **Release**（`v1.0.1`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.1`，`docker/podman run` 直接运行。
+- **Release**（`v1.0.2`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.2`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -32,8 +32,8 @@
 
 容器镜像：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.1
-    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.1
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.2
+    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.0.2
 
 ## 快速开始
 

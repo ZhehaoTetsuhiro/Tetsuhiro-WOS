@@ -115,9 +115,16 @@ func (p *Plane) ProfileOf(axis, kind string, coord *float64) (Profile, error) {
 	n := p.Size
 	get := func(idx int) float64 {
 		ex := p.Ex[idx]
-		ey := p.Ey[idx]
 		ix := real(ex)*real(ex) + imag(ex)*imag(ex)
-		iy := real(ey)*real(ey) + imag(ey)*imag(ey)
+		// A plane that merged several incoherent units keeps only an amplitude
+		// proxy in Ex (= sqrt of the total intensity) and no Ey/Ez of its own,
+		// so both components must be probed before use.
+		var iy float64
+		var ey complex128
+		if p.Ey != nil {
+			ey = p.Ey[idx]
+			iy = real(ey)*real(ey) + imag(ey)*imag(ey)
+		}
 		var iz float64
 		var ezv complex128
 		if p.Ez != nil {

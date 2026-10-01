@@ -1,8 +1,10 @@
 package optics
 
 import (
+	"fmt"
 	"math"
 	"math/cmplx"
+	"strings"
 	"testing"
 )
 
@@ -137,9 +139,10 @@ func TestSceneExampleTwoSourcesAreIncoherent(t *testing.T) {
 }
 
 // TestExampleGratingSpectrumOrders verifies the grating preset really shows a
-// grating spectrum: the orders must land in the focal plane where the geometry
-// puts them (x_q = q·f·λ/Λ), carry the Raman-Nath weights J_q(m/2)², and the
-// detector must collect the source power.
+// grating spectrum: the seven wavelengths must be dispersed into the focal
+// plane by the Fourier lens (x_q = q·f·λ/Λ), each ±1 order carrying the
+// Raman-Nath weight J_q(m/2)² divided between them, and the detector must
+// collect the source power.
 //
 // This is the regression test for the preset that used to be an element train
 // ending in a 1 m fraunhofer propagation. Once the GUI converted element trains
@@ -162,6 +165,18 @@ func TestExampleGratingSpectrumOrders(t *testing.T) {
 	if !cfg.IsScene() {
 		t.Fatal("the grating preset must be a positioned scene (element trains lose the far-field geometry)")
 	}
+	// A spectrum needs a range of wavelengths; one wavelength can only give
+	// one point per order.
+	if len(cfg.Sources) < 5 {
+		t.Fatalf("the grating preset has %d source(s): a spectrum needs several wavelengths", len(cfg.Sources))
+	}
+	lo, hi := math.Inf(1), 0.0
+	for _, s := range cfg.Sources {
+		if s.Wavelength <= 0 {
+			t.Fatalf("source %q carries no wavelength of its own", s.ID)
+		}
+		lo, hi = math.Min(lo, s.Wavelength), math.Max(hi, s.Wavelength)
+	}
 	res, err := Simulate(*cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -172,55 +187,115 @@ func TestExampleGratingSpectrumOrders(t *testing.T) {
 		t.Fatal(err)
 	}
 	const focal, period = 0.3, 1e-4
-	// x_q = q·f·λ/Λ (the paraxial focal-plane position of order q).
-	xq := func(q int) float64 { return float64(q) * focal * cfg.Wavelength / period }
-	// Peak of order q: the maximum inside a ±3 pixel window around its
-	// predicted position, which must itself be a maximum of the cut.
-	lobe := func(q int) (float64, float64) {
-		ci := int(math.Round(pl.Stats.CentroidX/pl.DX + float64(pl.Size)/2))
-		target := ci + int(math.Round(xq(q)/pl.DX))
-		mx, at := 0.0, target
-		for i := target - 3; i <= target+3; i++ {
-			if i < 0 || i >= len(prof.V) {
-				continue
-			}
-			if prof.V[i] > mx {
-				mx, at = prof.V[i], i
+	// x_q(λ) = q·f·λ/Λ: where the q-th order of a λ-source lands.
+	xq := func(q int, wl float64) float64 { return float64(q) * focal * wl / period }
+	centre := func(x float64) int { return int(math.Round(pl.Stats.CentroidX/pl.DX + float64(pl.Size)/2 + x/pl.DX)) }
+	atX := func(x float64) float64 { // brightest sample within ±3 px of x
+		mx := 0.0
+		for i := centre(x) - 3; i <= centre(x)+3; i++ {
+			if i >= 0 && i < len(prof.V) && prof.V[i] > mx {
+				mx = prof.V[i]
 			}
 		}
-		return mx, (float64(at) - float64(pl.Size)/2) * pl.DX
+		return mx
 	}
-	i0, p0 := lobe(0)
-	i1, p1 := lobe(1)
-	i2, p2 := lobe(2)
+	i0 := atX(0)
 	if i0 <= 0 {
 		t.Fatal("no light on the optical axis")
 	}
-	// Order positions: within one pixel of q·f·λ/Λ.
-	if off := math.Abs(p0); off > pl.DX {
-		t.Errorf("zeroth order at %g m, want 0 (off by %g px)", p0, off/pl.DX)
-	}
-	for q, p := range map[int]float64{1: p1, 2: p2} {
-		if off := math.Abs(p - xq(q)); off > 2*pl.DX {
-			t.Errorf("order %d at %g m, want %g m (off by %.1f px)", q, p, xq(q), off/pl.DX)
+	// (1) Dispersion: the pattern above 2 % of the axial peak is exactly the
+	//     ±1 order of every wavelength — discrete orders, no continuum, and no
+	//     other structure (a wrapped/aliased run would fill the window).
+	var peaks []float64
+	for i := 1; i < len(prof.V)-1; i++ {
+		if prof.V[i] > prof.V[i-1] && prof.V[i] >= prof.V[i+1] && prof.V[i] > 0.02*i0 {
+			peaks = append(peaks, (float64(i)-float64(pl.Size)/2)*pl.DX)
 		}
 	}
-	// Raman-Nath weights: I_q = J_q(m/2)² with m/2 = 1 rad for modulation 2.
-	want1 := math.Pow(jn(1, 1), 2) / math.Pow(jn(0, 1), 2)
-	if rel := math.Abs(i1/i0-want1) / want1; rel > 0.05 {
-		t.Errorf("I(±1)/I(0) = %.4f, want (J1/J0)² = %.4f", i1/i0, want1)
+	//     (the axial order plus the ±1 order of each wavelength).
+	if want := 2*len(cfg.Sources) + 1; len(peaks) != want {
+		at := make([]string, len(peaks))
+		for i, p := range peaks {
+			at[i] = fmt.Sprintf("%.2f", p*1e3)
+		}
+		t.Errorf("found %d peaks above 2%% of the axial peak, want %d (axial + ±1 of each of the %d wavelengths), at (mm): %s",
+			len(peaks), want, len(cfg.Sources), strings.Join(at, " "))
 	}
-	want2 := math.Pow(jn(2, 1), 2) / math.Pow(jn(0, 1), 2)
-	if rel := math.Abs(i2/i0-want2) / want2; rel > 0.15 {
-		t.Errorf("I(±2)/I(0) = %.4f, want (J2/J0)² = %.4f", i2/i0, want2)
+	for _, s := range cfg.Sources {
+		for _, q := range []int{-1, 1} {
+			want := xq(q, s.Wavelength)
+			best := math.Inf(1)
+			for _, p := range peaks {
+				best = math.Min(best, math.Abs(p-want))
+			}
+			if best > 2*pl.DX {
+				t.Errorf("no ±1 order peak near %g m for λ = %.0f nm (closest peak %.1f px away)", want, s.Wavelength*1e9, best/pl.DX)
+			}
+		}
 	}
-	// The orders must be separated: between them the pattern is dark, which is
-	// exactly what the pre-fix beat pattern was not.
-	mid := int(math.Round(pl.Stats.CentroidX/pl.DX + float64(pl.Size)/2 + xq(1)/2/pl.DX))
-	if r := prof.V[mid] / i0; r > 0.02 {
-		t.Errorf("midpoint between orders carries %.3f of the axial peak: no separated orders", r)
+	// (2) The strip is bounded by the extreme wavelengths: beyond the red end
+	//     of the ±1 order the window is dark.
+	for _, q := range []int{-1, 1} {
+		edge := xq(q, hi) + float64(q)*6*pl.DX
+		step := 1
+		if q < 0 {
+			step = -1
+		}
+		mx := 0.0
+		for i := centre(edge); i >= 0 && i < len(prof.V); i += step {
+			mx = math.Max(mx, prof.V[i])
+		}
+		if r := mx / i0; r > 0.02 {
+			t.Errorf("beyond order %d at %g m the cut still reaches %.3f of the axial peak: the strip is not bounded by λ = %.0f nm",
+				q, edge, r, hi*1e9)
+		}
 	}
-	// Energy: no element absorbs, and the detector spans the window.
+	// (3) Raman-Nath weights: the axial order collects all seven wavelengths,
+	//     so one wavelength's ±1 order carries (J1/J0)²/7 of the axial power.
+	//     Lobe *integrals* are used rather than peak heights (the focal spot is
+	//     only ~3 px wide, so its height depends on where it lands on the
+	//     grid), and the individual lobes may scatter around the mean: the cut
+	//     averages a 3 px slice, so the longer wavelengths lose part of their
+	//     wider lobe outside the slice.
+	lobe := func(x float64, half int) float64 {
+		sum := 0.0
+		for i := centre(x) - half; i <= centre(x)+half; i++ {
+			if i >= 0 && i < len(prof.V) {
+				sum += prof.V[i]
+			}
+		}
+		return sum
+	}
+	e0 := lobe(0, 5)
+	want1 := math.Pow(jn(1, 1), 2) / math.Pow(jn(0, 1), 2) / float64(len(cfg.Sources))
+	sum1, emin, emax := 0.0, math.Inf(1), 0.0
+	for _, s := range cfg.Sources {
+		e := 0.5 * (lobe(xq(1, s.Wavelength), 5) + lobe(xq(-1, s.Wavelength), 5))
+		sum1, emin, emax = sum1+e, math.Min(emin, e), math.Max(emax, e)
+	}
+	if rel := math.Abs(sum1/float64(len(cfg.Sources))/e0-want1) / want1; rel > 0.05 {
+		t.Errorf("mean I(±1)/I(0) = %.4f, want (J1/J0)²/%d = %.4f", sum1/float64(len(cfg.Sources))/e0, len(cfg.Sources), want1)
+	}
+	for _, e := range []float64{emin, emax} {
+		if rel := math.Abs(e/e0-want1) / want1; rel > 0.20 {
+			t.Errorf("I(±1)/I(0) = %.4f is %.0f%% off (J1/J0)²/%d = %.4f", e/e0, rel*100, len(cfg.Sources), want1)
+		}
+	}
+	// Every wavelength must carry its share of the source power.
+	pmin, pmax := math.Inf(1), 0.0
+	for i := range pl.Parts {
+		pmin, pmax = math.Min(pmin, pl.Parts[i].Power), math.Max(pmax, pl.Parts[i].Power)
+	}
+	if pl.MergedUnits() && (pmax-pmin)/pmax > 0.01 {
+		t.Errorf("the %d units carry powers %.6g…%.6g W: they must be equal", len(pl.Parts), pmin, pmax)
+	}
+	// (4) Between the axial order and the strip the pattern is dark — which is
+	//     what the pre-fix beat pattern was not.
+	mid := 0.5 * xq(1, lo)
+	if r := atX(mid) / i0; r > 0.02 {
+		t.Errorf("the gap between the axial order and the strip carries %.3f of the axial peak: no separated orders", r)
+	}
+	// (5) Energy: no element absorbs, and the detector spans the window.
 	if rel := math.Abs(pl.Stats.Power-1e-3) / 1e-3; rel > 0.01 {
 		t.Errorf("detector power %.6g W, want ~1e-3 W", pl.Stats.Power)
 	}

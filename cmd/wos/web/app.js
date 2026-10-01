@@ -654,7 +654,7 @@ function renderSource() {
   const ginp = document.createElement("input");
   ginp.type = "text";
   ginp.value = s.group === "solo" ? "" : (s.group || "");
-  ginp.placeholder = "留空 = 独立光源（强度叠加）";
+  ginp.placeholder = "留空 = 独立光源";
   ginp.title = "同组同波长的光源按相干叠加（可产生干涉条纹），不同组/不同波长只做强度叠加";
   ginp.addEventListener("change", () => { s.group = ginp.value.trim(); scheduleRun(); });
   grow.appendChild(ginp);
