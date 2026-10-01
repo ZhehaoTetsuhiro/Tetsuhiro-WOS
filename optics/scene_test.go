@@ -415,3 +415,50 @@ func TestLayoutFromElementsLightsDetector(t *testing.T) {
 		t.Error("converted scene produced no routed segments")
 	}
 }
+
+// TestLayoutFromElementsKeepsWholeField pins the other half of the legacy →
+// scene conversion: the old sensor had no outline and recorded the whole field,
+// so the converter must not invent a small window for it. With the 3 mm outline
+// it used to add, a converted single-slit train lost the sidelobe at 2.4 mm and
+// recorded 14% of the light the legacy path recorded.
+func TestLayoutFromElementsKeepsWholeField(t *testing.T) {
+	cfg := Config{
+		Grid:       GridSpec{Size: 1024, Width: 0.02},
+		Wavelength: 632.8e-9,
+		Method:     "asm", Evanescent: "decay",
+		Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
+		Elements: []ElementSpec{
+			{Type: "aperture", Params: map[string]any{"shape": "rectangle", "width": 4e-4, "height": 0.02}},
+			{Type: "propagate", Params: map[string]any{"distance": 1.0}},
+			{Type: "sensor", Params: map[string]any{"label": "远场"}},
+		},
+	}
+	scene := LayoutFromElements(&cfg)
+	if n := len(scene.Components); n != 2 {
+		t.Fatalf("converted scene has %d components, want 2", n)
+	}
+	if sh := scene.Components[1].Shape; sh != nil {
+		t.Fatalf("the converted sensor got an invented outline %v; the legacy sensor records the whole field", sh)
+	}
+	conv := cfg
+	conv.Elements = nil
+	conv.Scene = scene
+	res, err := Simulate(conv)
+	if err != nil {
+		t.Fatalf("Simulate(converted): %v", err)
+	}
+	pl := res.Planes[0]
+	// The slit transmits 2e-5 W and the whole far field must be recorded (the
+	// 3 mm window used to cut it to 2.76e-6 W, i.e. 14%).
+	if rel := math.Abs(pl.Stats.Power-2e-5) / 2e-5; rel > 0.10 {
+		t.Errorf("converted detector power %.4g W, want the whole far field ~2e-5 W", pl.Stats.Power)
+	}
+	prof, err := pl.ProfileOf("x", KindIntensity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, peak, _ := halfMaxEdges(prof)
+	if v, _ := lobeNear(prof, pl.DX, 1.43*1.582e-3, 3*pl.DX); v/peak < 0.02 {
+		t.Errorf("the first sidelobe is missing from the converted plane (%.2f%% of the peak)", 100*v/peak)
+	}
+}

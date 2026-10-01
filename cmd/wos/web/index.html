@@ -9,7 +9,7 @@
 </head>
 <body>
 <header>
-  <h1>Tetsuhiro WOS <span class="version">v1.0.0</span></h1>
+  <h1>Tetsuhiro WOS <span class="version">v1.0.1</span></h1>
   <div class="status" id="status" role="status" aria-live="polite">加载中…</div>
   <button id="newBtn" title="新建空白光路 (n)">新建 (n)</button>
   <button id="openBtn" title="打开 JSON 配置文件 (o)">打开 (o)</button>
@@ -80,7 +80,7 @@
   <section id="center" aria-label="输出">
     <div id="waveOutput">
       <div id="viewTabs" role="tablist" aria-label="显示视图">
-        <button role="tab" data-view="color">1 颜色</button>
+        <button role="tab" data-view="color">1 图像</button>
         <button role="tab" data-view="phase_u">2 相位</button>
         <button role="tab" data-view="pol">3 偏振</button>
         <button role="tab" data-view="ex">4 |Ex|²</button>
@@ -99,7 +99,7 @@
         <select id="channelSel" title="选择某个光源（通道）单独查看，或查看全部光源的合成结果"></select>
         <label for="exposure">曝光</label>
         <input type="range" id="exposure" min="-3" max="3" step="0.1" value="0"
-               title="颜色视图的亮度曝光（±3 档，每档 2 倍）">
+               title="图像视图的亮度曝光（±3 档，每档 2 倍）">
         <span id="viewNote" class="hint"></span>
       </div>
       <div id="canvasWrap">

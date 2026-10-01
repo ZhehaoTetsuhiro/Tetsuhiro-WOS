@@ -439,173 +439,13 @@ type Example struct {
 	Config Config `json:"config"`
 }
 
-// Examples returns the built-in preset configurations. The first entries are
-// positioned scenes (components carry a place on the table); the later ones are
-// legacy element trains, which remain supported and are shown in the layout
-// view through a synthesized scene.
+// Examples returns the built-in preset configurations. Every preset is a
+// positioned scene: components carry a place and an outline, and the light
+// path is derived from that geometry — the same model the GUI edits and the
+// 3D view draws.
 func Examples() []Example {
 	bl := &BandlimitOpts{Fraction: 0.9, Sigma: 0.05}
-	pf2 := func(b bool) *bool { return &b }
-	ex := append(sceneExamples(bl), []Example{
-		{Name: "高斯光束传播", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 1e-3, "power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "propagate", Params: map[string]any{"distance": 0.05}},
-				{Type: "sensor", Params: map[string]any{"label": "z=0.05m"}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.25}},
-				{Type: "sensor", Params: map[string]any{"label": "z=0.3m"}},
-			},
-		}},
-		{Name: "透镜聚焦（艾里斑）", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "lens", Params: map[string]any{"f": 0.5, "aperture": 0.0025}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.5}},
-				{Type: "sensor", Params: map[string]any{"label": "焦面", "strehl_aperture": 0.0025, "strehl_distance": 0.5}},
-			},
-		}},
-		{Name: "单缝夫琅禾费衍射", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.02}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "aperture", Params: map[string]any{"shape": "rectangle", "width": 4e-4, "height": 0.02}},
-				{Type: "propagate", Params: map[string]any{"distance": 1.0, "method": "fraunhofer"}},
-				{Type: "sensor", Params: map[string]any{"label": "远场"}},
-			},
-		}},
-		{Name: "双缝干涉", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.02}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "aperture", Params: map[string]any{"shape": "double_slit", "width": 1e-4, "height": 0.02, "separation": 1e-3}},
-				{Type: "propagate", Params: map[string]any{"distance": 1.0, "method": "fraunhofer"}},
-				{Type: "sensor", Params: map[string]any{"label": "干涉条纹"}},
-			},
-		}},
-		{Name: "衍射光栅光谱", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.008}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "grating", Params: map[string]any{"kind": "phase_sin", "period": 2e-5, "modulation": 2.0}},
-				{Type: "propagate", Params: map[string]any{"distance": 1.0, "method": "fraunhofer"}},
-				{Type: "sensor", Params: map[string]any{"label": "衍射级"}},
-			},
-		}},
-		{Name: "圆孔衍射（远场艾里斑）", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.02}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "aperture", Params: map[string]any{"shape": "circle", "radius": 2e-3}},
-				{Type: "propagate", Params: map[string]any{"distance": 2.0, "method": "fraunhofer"}},
-				{Type: "sensor", Params: map[string]any{"label": "远场"}},
-			},
-		}},
-		{Name: "波带片聚焦", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.004}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "zone_plate", Params: map[string]any{"f": 0.05, "radius": 0.002, "kind": "phase"}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.05}},
-				{Type: "sensor", Params: map[string]any{"label": "焦点"}},
-			},
-		}},
-		{Name: "光学涡旋", Config: Config{
-			Grid: GridSpec{Size: 512, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 2e-3, "power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "spiral_phase", Params: map[string]any{"charge": 3}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.3}},
-				{Type: "sensor", Params: map[string]any{"label": "涡旋光束"}},
-			},
-		}},
-		{Name: "偏振片与波片", Config: Config{
-			Grid: GridSpec{Size: 512, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(true),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 2e-3, "power": 1e-3, "polarization": "d"}},
-			Elements: []ElementSpec{
-				{Type: "retarder", Params: map[string]any{"retardance": 1.5708, "axis": 0}},
-				{Type: "sensor", Params: map[string]any{"label": "经过 QWP（45°线偏振→圆偏振）"}},
-			},
-		}},
-		{Name: "马赫-曾德尔干涉仪", Config: Config{
-			Grid: GridSpec{Size: 512, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 2e-3, "power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "propagate", Params: map[string]any{"distance": 0.02}},
-				{Type: "beamsplitter", Params: map[string]any{"reflectivity": 0.5, "reflected_arm": map[string]any{
-					"elements": []any{map[string]any{"type": "propagate", "params": map[string]any{"distance": 0.04}}},
-				}}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.04}},
-				{Type: "combiner", Params: map[string]any{"outputs": []any{
-					map[string]any{"label": "端口1", "weights": []any{
-						map[string]any{"arm": "main", "re": 0.70710678, "im": 0},
-						map[string]any{"arm": "bs0", "re": 0, "im": 0.70710678}}},
-					map[string]any{"label": "端口2", "weights": []any{
-						map[string]any{"arm": "main", "re": 0, "im": 0.70710678},
-						map[string]any{"arm": "bs0", "re": 0.70710678, "im": 0}}},
-				}}},
-			},
-		}},
-		{Name: "迈克尔逊干涉仪", Config: Config{
-			Grid: GridSpec{Size: 512, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 2e-3, "power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "propagate", Params: map[string]any{"distance": 0.01}},
-				{Type: "beamsplitter", Params: map[string]any{"reflectivity": 0.5, "reflected_arm": map[string]any{
-					"elements": []any{
-						map[string]any{"type": "propagate", "params": map[string]any{"distance": 0.02}},
-						map[string]any{"type": "mirror", "params": map[string]any{}},
-						map[string]any{"type": "propagate", "params": map[string]any{"distance": 0.02}},
-					},
-				}}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.02}},
-				{Type: "mirror", Params: map[string]any{}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.02}},
-				{Type: "combiner", Params: map[string]any{"outputs": []any{
-					map[string]any{"label": "探测器", "weights": []any{
-						map[string]any{"arm": "main", "re": 0.70710678, "im": 0},
-						map[string]any{"arm": "bs0", "re": 0, "im": 0.70710678}}},
-					map[string]any{"label": "回光源端口", "weights": []any{
-						map[string]any{"arm": "main", "re": 0, "im": 0.70710678},
-						map[string]any{"arm": "bs0", "re": 0.70710678, "im": 0}}},
-				}}},
-			},
-		}},
-		{Name: "贝塞尔光束（轴锥镜）", Config: Config{
-			Grid: GridSpec{Size: 512, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "gaussian", Params: map[string]any{"waist": 3e-3, "power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "axicon", Params: map[string]any{"alpha": 0.02, "index": 1.5}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.2}},
-				{Type: "sensor", Params: map[string]any{"label": "贝塞尔区"}},
-			},
-		}},
-		{Name: "像差研究（泽尼克球差+离焦）", Config: Config{
-			Grid: GridSpec{Size: 1024, Width: 0.01}, Wavelength: 632.8e-9, Polarized: pf2(false),
-			Method: "asm", Evanescent: "decay", Bandlimit: bl,
-			Source: SourceSpec{Type: "plane", Params: map[string]any{"power": 1e-3}},
-			Elements: []ElementSpec{
-				{Type: "lens", Params: map[string]any{"f": 0.3, "aperture": 0.003}},
-				{Type: "zernike", Params: map[string]any{"radius": 0.003, "c4": 0.5, "c11": 1.0}},
-				{Type: "propagate", Params: map[string]any{"distance": 0.3}},
-				{Type: "sensor", Params: map[string]any{"label": "像差焦斑", "strehl_aperture": 0.003, "strehl_distance": 0.3}},
-			},
-		}},
-	}...)
-	return ex
+	return sceneExamples(bl)
 }
 
 // sceneExamples returns the built-in positioned-scene presets: every component
@@ -712,11 +552,202 @@ func sceneExamples(bl *BandlimitOpts) []Example {
 			Shape: CircleOutline(5e-3), Params: map[string]any{"strehl_aperture": 2e-3, "strehl_distance": 0.5}},
 	}}
 
+	// ---- grating spectrum ---------------------------------------------------
+	// The orders are formed in the focal plane of a Fourier lens. Propagating a
+	// distance z straight onto the fixed grid cannot show this: the ±1 orders
+	// sit at z·λ/Λ (31.6 mm for Λ = 20 µm and z = 1 m), far outside the 8 mm
+	// window, so the circular ASM wraps them back as a structureless beat
+	// pattern, and the far-field spot λz/D = 79 µm is unresolvable once the
+	// window is the aperture. A lens maps the orders to the focal plane at
+	// f·λ/Λ, where they are both inside the window and resolved.
+	gs := base(1024, 0.008, false)
+	gs.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	gs.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "grating", Type: "grating", Label: "衍射光栅", Pos: v3(0, 0, 0),
+			Params: map[string]any{"kind": "phase_sin", "period": 1e-4, "modulation": 2.0}},
+		{ID: "lens", Type: "lens", Label: "傅里叶透镜", Pos: v3(0, 0, 0.02),
+			Params: map[string]any{"f": 0.3}},
+		{ID: "det", Type: "sensor", Label: "衍射级（焦面）", Pos: v3(0, 0, 0.32), Yaw: math.Pi,
+			Shape: &ShapeSpec{Kind: "rectangle", Params: map[string]any{"width": 0.008, "height": 0.008}}},
+	}}
+
+	// ---- Airy disk: a circular stop imaged by a lens ------------------------
+	// A 4 mm aperture is not in the far field at any distance this grid can
+	// hold (F = D²/(λz) = 12.6 at z = 2 m), so the stop is placed in front of a
+	// lens and the Airy pattern is taken in the focal plane: first zero at
+	// 1.22·λf/D, first ring at 1.6·λf/D with ~1.7% of the peak.
+	ai := base(1024, 0.008, false)
+	ai.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	ai.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "stop", Type: "aperture", Label: "圆孔光阑（D=2 mm）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(1e-3)},
+		{ID: "lens", Type: "lens", Label: "傅里叶透镜（f=0.3 m）", Pos: v3(0, 0, 0.02),
+			Params: map[string]any{"f": 0.3}},
+		{ID: "det", Type: "sensor", Label: "焦面（艾里斑）", Pos: v3(0, 0, 0.32), Yaw: math.Pi,
+			Shape: CircleOutline(5e-4)},
+	}}
+
+	// ---- single slit: genuinely far field, a = 0.2 mm ≪ √(λz) = 0.8 mm ------
+	sl := base(1024, 0.02, false)
+	sl.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	sl.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "slit", Type: "aperture", Label: "单缝（宽 0.4 mm）", Pos: v3(0, 0, 0),
+			Shape: RectOutline(4e-4, 0.02)},
+		{ID: "det", Type: "sensor", Label: "远场", Pos: v3(0, 0, 1.0), Yaw: math.Pi,
+			Shape: RectOutline(0.018, 0.018)},
+	}}
+
+	// ---- double slit: fringe spacing λz/d ----------------------------------
+	ds := base(1024, 0.02, false)
+	ds.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	ds.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "slits", Type: "aperture", Label: "双缝（缝距 1 mm）", Pos: v3(0, 0, 0),
+			Shape: &ShapeSpec{Kind: "double_slit", Params: map[string]any{
+				"width": 1e-4, "height": 0.02, "separation": 1e-3}}},
+		{ID: "det", Type: "sensor", Label: "干涉条纹", Pos: v3(0, 0, 1.0), Yaw: math.Pi,
+			Shape: RectOutline(0.018, 0.018)},
+	}}
+
+	// ---- lens focus: the diffraction-limited Airy spot ----------------------
+	le := base(1024, 0.01, false)
+	le.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	le.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "lens", Type: "lens", Label: "聚焦透镜（f=0.5 m）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(2.5e-3), Params: map[string]any{"f": 0.5}},
+		// The detector spans the pupil: the Strehl ratio compares the recorded
+		// power against the ideal focus of a clear pupil of that radius, so a
+		// detector smaller than the beam would deflate it.
+		{ID: "det", Type: "sensor", Label: "焦面", Pos: v3(0, 0, 0.5), Yaw: math.Pi,
+			Shape: CircleOutline(5e-3), Params: map[string]any{
+				"strehl_aperture": 2.5e-3, "strehl_distance": 0.5}},
+	}}
+
+	// ---- Fresnel zone plate: focus at f, spot ~ λf/(2R) ---------------------
+	zp := base(1024, 0.004, false)
+	zp.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	zp.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "zp", Type: "zone_plate", Label: "菲涅耳波带片（f=50 mm）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(2e-3), Params: map[string]any{"f": 0.05, "kind": "phase"}},
+		{ID: "det", Type: "sensor", Label: "焦点", Pos: v3(0, 0, 0.05), Yaw: math.Pi,
+			Shape: CircleOutline(1e-4)},
+	}}
+
+	// ---- aberrations: Zernike spherical + defocus, Strehl drops -------------
+	ab := base(1024, 0.01, false)
+	ab.Sources = []SourceSpec{{
+		ID: "src", Label: "平面波光源", Type: "plane", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"power": 1e-3},
+	}}
+	ab.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "lens", Type: "lens", Label: "理想透镜（f=0.3 m）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(3e-3), Params: map[string]any{"f": 0.3}},
+		// The coefficients are in waves (Noll-normalized: |c| is the RMS of
+		// that mode), so 离焦 0.15λ + 球差 0.20λ is σ ≈ 0.25λ and the focus
+		// drops to Strehl ≈ 0.4. The detector sits exactly f from the lens:
+		// the Zernike plate is thin and does not move the focus.
+		{ID: "ab", Type: "zernike", Label: "泽尼克像差（离焦 0.15λ、球差 0.20λ）",
+			Pos: v3(0, 0, 0.02), Shape: CircleOutline(3e-3),
+			Params: map[string]any{"radius": 3e-3, "c4": 0.15, "c11": 0.20}},
+		{ID: "det", Type: "sensor", Label: "像差焦斑", Pos: v3(0, 0, 0.3), Yaw: math.Pi,
+			Shape: CircleOutline(6e-3), Params: map[string]any{
+				"strehl_aperture": 3e-3, "strehl_distance": 0.3}},
+	}}
+
+	// ---- optical vortex: the on-axis null of a charge-3 spiral plate --------
+	vo := base(512, 0.01, false)
+	vo.Sources = []SourceSpec{{
+		ID: "src", Label: "高斯光源", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 2e-3, "power": 1e-3},
+	}}
+	vo.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "spp", Type: "spiral_phase", Label: "螺旋相位板（l=3）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(4e-3), Params: map[string]any{"charge": 3}},
+		{ID: "det", Type: "sensor", Label: "涡旋光束", Pos: v3(0, 0, 0.25), Yaw: math.Pi,
+			Shape: CircleOutline(4e-3)},
+	}}
+
+	// ---- Bessel beam: axicon core 2.405λ/(2π(n-1)α) = 24 µm -----------------
+	be := base(1024, 0.004, false)
+	be.Sources = []SourceSpec{{
+		ID: "src", Label: "高斯光源", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 1.5e-3, "power": 1e-3},
+	}}
+	be.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "ax", Type: "axicon", Label: "轴锥镜（α=20 mrad）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(2e-3), Params: map[string]any{"alpha": 0.02, "index": 1.5}},
+		{ID: "det", Type: "sensor", Label: "贝塞尔区", Pos: v3(0, 0, 0.15), Yaw: math.Pi,
+			Shape: CircleOutline(2e-3)},
+	}}
+
+	// ---- Gaussian beam: two planes of the same free-space evolution --------
+	// A sensor ends the beam, so two planes of one free-space run are taken on
+	// the two arms of a 50/50 splitter. w₀ = 0.2 mm gives z_R = 0.2 m, so the
+	// waist really does grow between the two arms (0.21 mm -> 0.36 mm).
+	gb := base(512, 0.008, false)
+	gb.Sources = []SourceSpec{{
+		ID: "src", Label: "高斯光源（w₀=0.2 mm）", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 2e-4, "power": 1e-3},
+	}}
+	gb.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "bs", Type: "beamsplitter", Label: "分束器（50/50）", Pos: v3(0, 0, 0), Yaw: -math.Pi / 4,
+			Shape: CircleOutline(2e-3), Params: map[string]any{"reflectivity": 0.5}},
+		// Reflected arm: 50 mm from the waist.
+		{ID: "d1", Type: "sensor", Label: "距腰 50 mm", Pos: v3(0.05, 0, 0), Yaw: -math.Pi / 2,
+			Shape: CircleOutline(2e-3)},
+		// Transmitted arm: 300 mm from the waist.
+		{ID: "d2", Type: "sensor", Label: "距腰 300 mm", Pos: v3(0, 0, 0.3), Yaw: math.Pi,
+			Shape: CircleOutline(2e-3)},
+	}}
+
+	// ---- polarizer + quarter-wave plate: 45° linear -> circular ------------
+	pw := base(512, 0.01, true)
+	pw.Sources = []SourceSpec{{
+		ID: "src", Label: "线偏振 45° 光源", Type: "gaussian", Pos: pos(0, 0, -0.05), Dir: dir(0, 0, 1),
+		Params: map[string]any{"waist": 2e-3, "power": 1e-3, "polarization": "d"},
+	}}
+	pw.Scene = &SceneSpec{Components: []ComponentSpec{
+		{ID: "pol", Type: "polarizer", Label: "线偏振片（0°）", Pos: v3(0, 0, 0),
+			Shape: CircleOutline(4e-3), Params: map[string]any{"angle": 0.0}},
+		{ID: "qwp", Type: "retarder", Label: "四分之一波片（快轴 45°）", Pos: v3(0, 0, 0.02),
+			Shape: CircleOutline(4e-3), Params: map[string]any{"retardance": math.Pi / 2, "axis": math.Pi / 4}},
+		{ID: "det", Type: "sensor", Label: "圆偏振光", Pos: v3(0, 0, 0.04), Yaw: math.Pi,
+			Shape: CircleOutline(4e-3)},
+	}}
+
 	return []Example{
-		{Name: "迈克尔逊干涉仪（定位元件）", Config: mi},
-		{Name: "马赫-曾德尔干涉仪（定位元件）", Config: mz},
+		{Name: "迈克尔逊干涉仪", Config: mi},
+		{Name: "马赫-曾德尔干涉仪", Config: mz},
+		{Name: "衍射光栅光谱", Config: gs},
+		{Name: "圆孔衍射（远场艾里斑）", Config: ai},
+		{Name: "单缝夫琅禾费衍射", Config: sl},
+		{Name: "双缝干涉", Config: ds},
+		{Name: "透镜聚焦（艾里斑）", Config: le},
+		{Name: "波带片聚焦", Config: zp},
+		{Name: "像差研究（泽尼克球差+离焦）", Config: ab},
+		{Name: "光学涡旋", Config: vo},
+		{Name: "贝塞尔光束（轴锥镜）", Config: be},
+		{Name: "高斯光束传播", Config: gb},
 		{Name: "双光源：相干条纹与双波长颜色", Config: ts},
 		{Name: "偏振与相位：线偏振→波片→焦面", Config: pol},
+		{Name: "偏振片与波片", Config: pw},
 		{Name: "直线光路：光阑+透镜聚焦", Config: line},
 	}
 }

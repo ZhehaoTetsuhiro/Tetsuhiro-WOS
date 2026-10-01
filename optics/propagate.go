@@ -217,11 +217,114 @@ func asmWarn(f *Field, z float64, ctx *Context, pIn, pOut float64, zeroEv, reg b
 	}
 }
 
+// asmWrapWarn reports the one silent failure mode of the angular spectrum
+// family: the transfer function H = exp(-i pi lambda z f²) is sampled every
+// df = 1/(N dx), so at a frequency f its phase step is 2 pi lambda z f df. Past
+// pi the samples alias, which in real space is the circular convolution folding
+// the light back into the window: the step then no longer computes the field of
+// this geometry. The criterion is geometric, and it is evaluated on the field
+// *entering* the step — the angular content that decides where the light goes:
+//
+//	|z| * lambda * f_sig <= carry,   f_sig = 90% spectral power radius
+//
+// The radius is taken at 90% of the spectral power: a hard aperture always
+// scatters a little power to very high frequencies (the edges of the window
+// itself), and those dim tails wrap harmlessly. What has to fit is the bulk of
+// the light.
+//
+// The zero-padded variants sample the transfer function twice as finely, so for
+// uniformity `carry` is the field window width N*dx for every variant (half of
+// it is the strict sampling limit, but the error stays small well past that:
+// built-in presets running at 1.05-1.25x half a window still match their
+// analytic patterns). The warning is therefore reserved for the unambiguous
+// case — the bulk of the light moves by more than a whole window, so it cannot
+// be where the grid says it is.
+//
+// This is exactly how a far-field geometry fails on a fixed grid: the orders of
+// a grating (f = 1/Lambda) land at z*lambda/Lambda, i.e. 31.6 mm for
+// Lambda = 20 µm at z = 1 m — far outside an 8 mm window — and the run used to
+// report a structureless beat pattern with no warning at all.
+func asmWrapWarn(f *Field, z float64, ctx *Context, carry float64) {
+	if ctx == nil || ctx.Warnings == nil || z == 0 || carry <= 0 {
+		return
+	}
+	if math.Abs(z)*ctx.Wavelength/(2*f.DX) <= carry {
+		return // no frequency in the grid can break the criterion
+	}
+	fSig := spectralRadius(f, 0.90)
+	if fSig <= 0 {
+		return
+	}
+	if walk := math.Abs(z) * ctx.Wavelength * fSig; walk > carry {
+		ctx.Warnings.Add("asm_alias_wrap",
+			fmt.Sprintf("角谱传播在 |z|=%g m 上的横向位移 %.4g m 超过窗口宽度 %.4g m：光谱采样折叠，光被环绕回窗口，该步结果不可信（缩短距离、增大网格，或用傅里叶透镜把远场搬到焦面）",
+				math.Abs(z), walk, carry),
+			walk/carry)
+	}
+}
+
+// spectralRadius returns the spatial-frequency radius (1/m) that holds the
+// given fraction of the field's spectral power — what the propagation has to
+// carry. A hard aperture scatters a little power to very high frequencies, so a
+// threshold near 1 measures the beam rather than those edges.
+func spectralRadius(f *Field, frac float64) float64 {
+	if frac <= 0 || frac >= 1 {
+		frac = 0.99
+	}
+	n := f.N
+	const bins = 96
+	fnyq := 1 / (2 * f.DX)
+	if n == 0 || f.DX <= 0 {
+		return 0
+	}
+	hist := make([]float64, bins+1)
+	var tot float64
+	accum := func(c []complex128) {
+		if c == nil {
+			return
+		}
+		a := append([]complex128(nil), c...)
+		fft2D(a, n, false)
+		for j := 0; j < n; j++ {
+			fy := f.freq(j)
+			for i := 0; i < n; i++ {
+				v := a[j*n+i]
+				w := real(v)*real(v) + imag(v)*imag(v)
+				if w == 0 {
+					continue
+				}
+				b := int(math.Hypot(f.freq(i), fy) / fnyq * bins)
+				if b > bins {
+					b = bins
+				}
+				hist[b] += w
+				tot += w
+			}
+		}
+	}
+	accum(f.Ex)
+	if f.Polarized {
+		accum(f.Ey)
+	}
+	if tot <= 0 {
+		return 0
+	}
+	run := 0.0
+	for b := 0; b <= bins; b++ {
+		run += hist[b]
+		if run >= frac*tot {
+			return float64(b) / bins * fnyq
+		}
+	}
+	return fnyq
+}
+
 // propASM: U(z) = F^-1{ F{U} * exp(i k z sqrt(1-(lambda fx)^2-(lambda fy)^2)) }.
 // Evanescent components (lambda*f > 1) decay as exp(-k|z| sqrt((lambda f)^2-1))
 // forward, and are zeroed on backward propagation (they would amplify).
 func propASM(f *Field, z float64, ctx *Context) {
 	zero, reg, alpha, limit := ctx.evanescentPolicy(z)
+	asmWrapWarn(f, z, ctx, float64(f.N)*f.DX)
 	pIn := f.Power()
 	ctx.transfer(f, z, asmTF(ctx.Wavelength, z, zero, reg, alpha, limit))
 	pOut := f.Power()
@@ -252,6 +355,7 @@ func propASMPadCore(f *Field, z float64, ctx *Context, fxOff, fyOff float64) {
 		}
 		return float64(i-m) / (float64(m) * dx)
 	}
+	asmWrapWarn(f, z, ctx, float64(n)*dx)
 	pIn := f.Power()
 	buf := make([]complex128, m*m)
 	off := n / 2
@@ -338,6 +442,7 @@ func propASMShift(f *Field, z float64, ctx *Context) {
 			}
 		}
 	}
+	asmWrapWarn(f, z, ctx, float64(n)*f.DX)
 	pIn := f.Power()
 	shift(f.Ex, -1)
 	if f.Polarized {

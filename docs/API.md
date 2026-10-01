@@ -72,7 +72,7 @@ state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / th
 
 - path 为臂路径（"" = 主光路，bs0 = 第 1 分束臂……）。
 - stats 单位为 SI：power W、peak/intensity W/m²、质心/RMS m、strehl 无量纲（未启用时为 0）。
-- warnings 常见码：fresnel_tf_alias、fresnel_ir_alias、fraunhofer_nearfield、evanescent_filtered、backward_evanescent（含义见 docs/PHYSICS.md）。
+- warnings 常见码：fresnel_tf_alias、fresnel_ir_alias、fraunhofer_nearfield、asm_alias_wrap、evanescent_filtered、backward_evanescent（含义见 docs/PHYSICS.md）。
 
 ## GET /api/runs/{id}/planes/{pid}
 
@@ -86,7 +86,7 @@ state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / th
 | scale | lin / log（强度类） | 强度 log，相位/偏振 lin |
 | cmap | inferno / phase / gray / diverging | 按视图（相位与偏振方位角用 phase，斯托克斯/椭率用 diverging） |
 | mask | 相位/偏振视图的强度掩膜阈值（相对峰值） | 相位 2e-3，偏振 1e-6 |
-| exposure, gamma | 颜色视图的曝光倍数与 γ（仅 field=color&fmt=png） | 1，1 |
+| exposure, gamma | 图像视图的曝光倍数与 γ（仅 field=color&fmt=png） | 1，1 |
 | pmin, pmax | 手动数据范围（物理单位） | 自动（stats 或 ±π） |
 
 `field=color` 只支持 `fmt=png`：按各光源波长把强度映射为真实颜色的 sRGB 图像（亮度为真实强度，曝光按 2 的幂缩放）。
@@ -98,7 +98,7 @@ fmt=png：RGBA PNG（大小 = 网格尺寸）。
 
 ## GET /api/runs/{id}/profiles/{pid}
 
-查询参数：axis = x | y（默认 x）；field 同上（`color` 除外，颜色是色调图，用 `total` 取曲线）；coord = 固定坐标（m，缺省用强度质心）；part = 相干单元序号。被掩膜的相位点返回 `null`（GUI 曲线会自动跳过）。
+查询参数：axis = x | y（默认 x）；field 同上（`color` 除外，图像是色调图，用 `total` 取曲线）；coord = 固定坐标（m，缺省用强度质心）；part = 相干单元序号。被掩膜的相位点返回 `null`（GUI 曲线会自动跳过）。
 
     {"axis":"x","coord":0,"x":[-0.005,...],"v":[9.6e-8,...]}
 

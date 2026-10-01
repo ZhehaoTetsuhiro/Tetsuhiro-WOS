@@ -2,6 +2,27 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.1] - 2026-10-01
+
+### 修复
+
+- **内置模板「衍射光栅光谱」在定位场景模型下失效**：该模板原为「平面波 → 光栅 → 1 m 夫琅禾费传播 → 探测器」的元件序列；v1.0.0 起 GUI 会把旧元件序列转换成定位场景，远场几何随之丢失——1 m 处 ±1 级落在 ±31.6 mm（8 mm 窗口之外），且光栅场谱接近 Nyquist，固定网格上的角谱法只能给出无结构的拍频图样（导出剖面是一整片平坦区，看不到级次），而且**没有任何告警**。现改为**傅里叶透镜**版（平面波 → 光栅 Λ=100 µm → f=0.3 m 透镜 → 焦面探测器）：级次落在焦面 x_q = q·f·λ/Λ = 0、±1.90 mm，权重符合 Raman-Nath J_q(m/2)²（实测 I₁/I₀ = 0.3305，理论 0.3314），探测器收满 99.996% 光源功率；回归测试 `TestExampleGratingSpectrumOrders` 按解析值锁定级次位置、I₁/I₀、级间暗区与能量守恒（旧几何下该测试立即失败）。
+- **新增角谱走离/环绕告警 `asm_alias_wrap`**：角谱传递函数按 df = 1/(N·dx) 采样，频率 f 处的相位步进为 2πλz·f·df，超过 π 即混叠——在实空间里就是光走出窗口后被循环卷积绕回，该步结果不再属于这个几何。判据为 `|z|·λ·f_sig ≤ 窗口宽度 N·dx`（f_sig 为 90% 频谱功率半径，在**进入该步之前**的场上测量；严格采样极限是半个窗口，但实测误差在超过半个窗口后仍很小，故只在“光整体走离超过一整个窗口”这一无歧义情形告警）。内置 16 套模板全部不触发；旧光栅几何（Λ=20 µm、z=1 m、8 mm 窗口）以 3.96× 越界被明确标出（`TestASMWrapWarning`）。这正是「远场几何在固定网格上静默失效」的那一类问题。
+- **「圆孔衍射（远场艾里斑）」同类失效**：D = 4 mm、z = 2 m 时菲涅耳数 F = D²/(λz) = 12.6，根本不是远场；转成场景后按固定网格角谱法计算，给出的是菲涅耳环（±0.70 mm / ±1.04 mm 处 47% / 27% 的强环），而艾里首环应在 0.51 mm 处、高度 1.7%。现改为光阑 + 傅里叶透镜 + 焦面探测器（网格 8 mm）：首环实测在 1.635·λf/D 处、高度 1.76%（理论 1.75%），`TestExampleCircularApertureAiry` 锁定。
+- **旧配置转换器给探测器编造 3×3 mm 轮廓**：旧模型的 `sensor` 没有轮廓、记录整幅场，转换器却给它加了一个 3 mm 小窗，转换后的剖面被裁掉（单缝 2.4 mm 处的一级旁瓣、以及约 86% 的光）。现不再编造轮廓，转换结果与旧模型一致（`TestLayoutFromElementsKeepsWholeField`）。
+
+### 变更
+
+- **「颜色」视图标签更名为「图像」**：视图键 `color`、`field=color` 端点与色度学含义不变；`index.html`、`app.js`（含帮助表与已过期的头部视图列表）、docs/GUI.md、docs/PHYSICS.md、docs/API.md 与 README.md 同步。
+- **全部内置示例重写为定位场景**：模板不再有元件序列版本，共 **16 套**（原 18 套中去掉两个与定位场景版重复的旧干涉仪模板，「（定位元件）」后缀一并去掉；`TestExamplesAreScenes` 断言所有模板均为场景）。几何按解析判据重新设计并逐条验证：单缝/双缝用真实远场（a ≪ √(λz)）、圆孔/光栅用傅里叶透镜焦面、透镜聚焦/像差用满口径探测器（使 Strehl 的“同功率”前提成立）、波带片焦斑 λf/(2R)=7.9 µm、贝塞尔环间距 π/k_r=31.4 µm、涡旋轴上零点、高斯束腰演化（分束器两臂取样 w₀=0.2 mm，w 由 0.21 mm 增至 0.36 mm）、偏振片 + 四分之一波片圆偏振（|S3|/S0 = 1.0000）；新增 13 项模板回归测试。
+- **不再随包分发示例 .json**：示例现在只存在于「模板」下拉中，删除 `examples/presets/*.json`（Michelson 光路示意图移至 `docs/michelson.svg`），zip 与容器镜像内不再包含 `presets/` 目录；旧版本 `.json` 仍可按 o 打开并自动转换为定位场景。
+- 高斯基模板、波带片/贝塞尔/像差模板的网格、探测器口径与传播距离按解析尺寸重新标定（详见 docs/PHYSICS.md 与 optics/catalog.go 内注释）。
+
+### 校验
+
+- `go test ./optics/`：113 项测试 + 21 个子测试全通过；`go vet ./...`、`gofmt -l` 干净。
+- 新二进制在真实浏览器中复核：模板载入为定位场景、运行状态「完成 · 无警告」、导出标题「衍射级（焦面） · 图像 · 1.00e-3 W」、剖面为 0 与 ±1.90 mm 三个尖峰。
+
 ## [v1.0.0] - 2026-09-30
 
 **1.0 的核心变更：光路模型从“元件序列（element train）”改为“带位置与几何形状的场景（positioned scene）”。** 光路不再记录“依次经过的元件”，而是记录每个元件的位置、朝向与轮廓，光路由几何推导；并据此新增多光源、真实光色、偏振/相位检查与整套光路的立体视图。
@@ -189,7 +210,9 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...HEAD
+[v1.0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.0...v1.0.1
+[v1.0.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...v1.0.0
 [v0.3.3]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.2...v0.3.3
 [v0.3.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.1...v0.3.2
 [v0.3.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.0...v0.3.1

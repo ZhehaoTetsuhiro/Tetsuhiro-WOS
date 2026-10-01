@@ -758,9 +758,11 @@ func traceFromGraph(g *sceneGraph) *SceneTrace {
 }
 
 // LayoutFromElements synthesizes a scene for a legacy element train: the
-// components are laid out along +z at the accumulated propagation distances, so
-// the layout view also works for element-sequence configurations. The
-// synthesized scene is display-only (the train is simulated directly).
+// components are laid out along +z at the accumulated propagation distances.
+// The layout view uses it so element-sequence configurations still draw, and
+// the server's convert endpoint uses it to hand an old file to the scene GUI —
+// which then *simulates* the synthesized scene, so it must stay faithful: a
+// sensor keeps the legacy semantics (no outline = record the whole field).
 func LayoutFromElements(cfg *Config) *SceneSpec {
 	scene := &SceneSpec{}
 	z := 0.0
@@ -772,9 +774,10 @@ func LayoutFromElements(cfg *Config) *SceneSpec {
 			z += pfd(el.Params, "distance", 0)
 		case "sensor":
 			// 旧模型没有朝向概念：探测器正对沿 +z 传来的光（法线指向 −z）。
+			// 旧模型的 sensor 也没有轮廓、记录整幅场；不要给它编造一个 3 mm 小窗，
+			// 否则转换后的剖面会被裁掉（单缝 2.4 mm 处的一级旁瓣就是这样丢的）。
 			scene.Components = append(scene.Components, ComponentSpec{
 				Type: "sensor", Label: ps(el.Params, "label", "sensor"), Pos: v3(0, 0, z), Yaw: math.Pi,
-				Shape: &ShapeSpec{Kind: "rectangle", Params: map[string]any{"width": 3e-3, "height": 3e-3}},
 			})
 		case "combiner":
 			outs, _ := el.Params["outputs"].([]any)
@@ -782,7 +785,6 @@ func LayoutFromElements(cfg *Config) *SceneSpec {
 				om, _ := outs[oi].(map[string]any)
 				scene.Components = append(scene.Components, ComponentSpec{
 					Type: "sensor", Label: ps(om, "label", fmt.Sprintf("out%d", oi)), Pos: v3(0, 0, z), Yaw: math.Pi,
-					Shape: &ShapeSpec{Kind: "rectangle", Params: map[string]any{"width": 3e-3, "height": 3e-3}},
 				})
 			}
 		case "beamsplitter":
