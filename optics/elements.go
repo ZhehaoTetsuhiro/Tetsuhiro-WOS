@@ -34,6 +34,37 @@ func RegisterElement(name string, factory ElementFactory) {
 	elementRegistry[name] = factory
 }
 
+// extraElementDocs holds catalog entries registered by generated elements
+// (RegisterGeneratedElement); BuildCatalog appends them after the built-ins.
+var extraElementDocs []ElementDoc
+
+// elementBehaviorOverrides records the routing behavior of registered elements
+// whose class is not the default transmit (a generated mirror element, say).
+var elementBehaviorOverrides = map[string]int{}
+
+// RegisterGeneratedElement registers a native element produced by
+// `wos -gen-go` (see exprgen.go): its factory, its catalog documentation and
+// its routing behavior. Generated elements register from init(), where a
+// duplicate name is an authoring mistake — it panics instead of silently
+// replacing another element.
+func RegisterGeneratedElement(name string, factory ElementFactory, doc ElementDoc, behavior int) {
+	if _, exists := elementRegistry[name]; exists {
+		panic(fmt.Sprintf("generated element %q duplicates an existing element type; regenerate with another -gen-name", name))
+	}
+	elementRegistry[name] = factory
+	if behavior != behaviorTransmit {
+		elementBehaviorOverrides[name] = behavior
+	}
+	doc.Type = name
+	doc.Custom = false
+	extraElementDocs = append(extraElementDocs, doc)
+}
+
+// GeneratedElementDocs returns the catalog entries of generated elements.
+func GeneratedElementDocs() []ElementDoc {
+	return append([]ElementDoc(nil), extraElementDocs...)
+}
+
 // RegisteredElements lists the names of all registered element types.
 func RegisteredElements() []string {
 	out := make([]string, 0, len(elementRegistry))
@@ -43,13 +74,17 @@ func RegisteredElements() []string {
 	return out
 }
 
-// NewElement instantiates an element from its spec.
+// NewElement instantiates an element from its spec. Besides the built-in
+// element registry, scripted elements loaded from definition files (see
+// customelem.go) are accepted.
 func NewElement(spec ElementSpec) (Element, error) {
-	fac, ok := elementRegistry[spec.Type]
-	if !ok {
-		return nil, fmt.Errorf("unknown element type %q", spec.Type)
+	if fac, ok := elementRegistry[spec.Type]; ok {
+		return fac(spec.Params)
 	}
-	return fac(spec.Params)
+	if cd, ok := scriptedElementFor(spec.Type); ok {
+		return cd.build(spec.Params)
+	}
+	return nil, fmt.Errorf("unknown element type %q", spec.Type)
 }
 
 // ---- parameter helpers ------------------------------------------------------

@@ -114,6 +114,24 @@ json.Unmarshal 到 optics.Config 即完成解析；ValidateConfig 给出逐项�
     curl -s -o plane.png "http://localhost:1120/api/runs/<RUN>/planes/sensor_0?field=total&fmt=png&scale=log&cmap=inferno"
     curl -s "http://localhost:1120/api/runs/<RUN>/profiles/sensor_0?axis=x&field=total"
 
+### 2.1.1 脚本元件（元件定义文件）
+
+元件的复透过率可以直接写成 `elements/<名字>.json` 里的表达式（格式与语言见 docs/KERNEL.md §4.1），
+服务端会把它当成普通元件类型：场景 JSON 里 `"type": "<名字>"` 即可，参数照常传。
+
+    curl -s http://localhost:1120/api/elements            # 已加载定义 + 版本号
+    curl -s -X POST http://localhost:1120/api/elements/reload   # 改完文件立刻重扫
+    curl -s -o mask.png "http://localhost:1120/api/elements/metalens/preview.png?kind=phase&size=256&width=0.008&wl=6.328e-7&f=0.3&sign=1"
+
+Go 库侧同样可用（定义目录、重载、代码生成）：
+
+    optics.SetElementDirs([]string{"elements"})     // 显式目录（默认见 §1，空则用默认搜索路径）
+    rep := optics.ReloadElementDefinitions(nil)     // rep.Loaded / rep.Errors / rep.Skipped
+    el, _ := optics.NewElement(optics.ElementSpec{Type: "metalens", Params: map[string]any{"f": 0.3}})
+
+    def, _ := optics.LoadElementDefinitionFile("elements/metalens.json")
+    src, _ := optics.GenerateElementGo(def, "metalens_native")   // 与 wos -gen-go 同一输出，可写进 optics/
+
 ### 2.2 二进制平面格式
 
 - fmt=bin：**float32 小端**裸数组，长度 N×N×4 字节，行主序（y 行 × x 列），无头。

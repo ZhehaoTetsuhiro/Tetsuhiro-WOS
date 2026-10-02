@@ -6,8 +6,11 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | /api/catalog | 元件/光源/算法/偏振/示例目录（GUI 由它驱动；含中文标签、单位、范围、默认值） |
+| GET | /api/catalog | 元件/光源/算法/偏振/示例目录（GUI 由它驱动；含中文标签、单位、范围、默认值；脚本元件以 `custom:true` + `source` 标记，`classes` 给出各类型的绘图类别） |
 | GET | /api/health | 存活检查 |
+| GET | /api/elements | 已加载的脚本元件（元件定义文件）列表：名字/标签/行为/类别/参数/表达式/来源文件 + `version` |
+| POST | /api/elements/reload | 重新扫描元件定义目录，返回 `{dirs, loaded, skipped, errors, version}` |
+| GET | /api/elements/{name}/preview.png | 脚本元件自身的掩膜图：`?kind=amp|phase&size=&width=&wl=&mask=&<参数…>`（PNG） |
 | POST | /api/validate | 校验配置，返回 {"ok":bool,"issues":[{path,message}]} |
 | POST | /api/quantum | 量子光学模拟，同步返回 QuantumResult（微秒级，无需轮询） |
 | POST | /api/simulate | 提交配置，202 返回 {"run_id","status":"running"}；后台计算（串行队列） |

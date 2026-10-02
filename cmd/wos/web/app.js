@@ -18,6 +18,10 @@
  */
 
 // ---------------- state ----------------
+// elemVersion tracks the server-side scripted-element version last pulled into
+// S.catalog; pollElements() reloads the catalog when it moves.
+let elemVersion = null;
+
 const S = {
   catalog: null,
   config: null,
@@ -447,6 +451,16 @@ function renderParams() {
     }
   }
 
+  let preview = null;
+  if (doc && doc.custom) {
+    const sub = document.createElement("div");
+    sub.className = "subhead";
+    sub.textContent = "脚本元件";
+    panel.appendChild(sub);
+    preview = elementPreviewBlock(c.type, doc, c);
+    panel.appendChild(preview);
+  }
+
   if (doc) {
     const own = doc.params.filter((pd) => pd.key !== "shape" && !GEOM_KEYS.includes(pd.key));
     if (own.length) {
@@ -457,11 +471,157 @@ function renderParams() {
       c.params = c.params || {};
       own.forEach((pd) => {
         if (pd.kind !== "nested" && !paramVisible(pd, Object.assign({ shape: c.shape && c.shape.kind }, c.params))) return;
-        panel.appendChild(mkParamRow(pd, () => c.params[pd.key], (v) => { c.params[pd.key] = v; },
+        panel.appendChild(mkParamRow(pd, () => c.params[pd.key], (v) => {
+          c.params[pd.key] = v;
+          if (preview) preview.refresh();
+        },
           () => { if (!hasDependent(own, pd.key)) return; renderParams(); }));
       });
     }
   }
+}
+
+// elementPreviewBlock renders the definition file link and a toggleable mask
+// preview of a scripted element (its own transmission |t| and wrapped phase,
+// drawn from the element's current parameters by the server).
+function elementPreviewBlock(type, doc, comp) {
+  const box = document.createElement("div");
+  box.className = "previewBlock";
+  const head = document.createElement("div");
+  head.className = "previewHead";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "mini";
+  btn.textContent = "掩膜预览";
+  btn.title = "按当前参数、网格宽度与波长绘制该元件的透过率 |t| 与包裹相位（服务端渲染，来源即定义文件）";
+  head.appendChild(btn);
+  const path = document.createElement("span");
+  path.className = "hint";
+  path.textContent = "定义文件：" + (doc.source || "（未命名）");
+  head.appendChild(path);
+  box.appendChild(head);
+
+  const imgs = document.createElement("div");
+  imgs.className = "previewImgs";
+  imgs.hidden = true;
+  const mk = (kind, caption, title) => {
+    const cell = document.createElement("div");
+    const img = document.createElement("img");
+    img.alt = caption;
+    img.title = title;
+    const cap = document.createElement("span");
+    cap.className = "hint";
+    cap.textContent = caption;
+    cell.appendChild(img);
+    cell.appendChild(cap);
+    imgs.appendChild(cell);
+    return img;
+  };
+  const imgAmp = mk("amp", "透过率 |t|", "|t| 线性映射：白 = 全透，黑 = 全挡");
+  const imgPh = mk("phase", "相位 φ", "包裹相位（-π…π），|t|≈0 处为空白（相位无定义）");
+  box.appendChild(imgs);
+
+  const refresh = () => {
+    if (imgs.hidden) return;
+    imgAmp.src = elementPreviewURL(type, "amp", comp.params);
+    imgPh.src = elementPreviewURL(type, "phase", comp.params);
+  };
+  btn.addEventListener("click", () => {
+    imgs.hidden = !imgs.hidden;
+    btn.classList.toggle("active", !imgs.hidden);
+    refresh();
+  });
+  box.refresh = refresh;
+  return box;
+}
+
+// elementPreviewURL builds the mask-preview URL for the element's current
+// parameters at the current grid width and wavelength.
+function elementPreviewURL(type, kind, params) {
+  const q = new URLSearchParams();
+  q.set("kind", kind);
+  q.set("size", "148");
+  q.set("width", String(S.config.grid.width));
+  q.set("wl", String(S.config.wavelength));
+  Object.keys(params || {}).forEach((k) => {
+    const v = params[k];
+    if (v === undefined || v === null || v === "") return;
+    if (typeof v === "boolean") { q.set(k, v ? "1" : "0"); return; }
+    if (typeof v === "number" || typeof v === "string") q.set(k, String(v));
+  });
+  return "/api/elements/" + encodeURIComponent(type) + "/preview.png?" + q.toString();
+}
+
+// reloadElements rescans the definition directories through the API and
+// refreshes the catalog, so new or edited scripted elements appear in the
+// insert dialog without a page reload.
+async function reloadElements(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/elements/reload", { method: "POST" });
+    if (!r.ok) throw new Error("reload " + r.status);
+    const rep = await r.json();
+    if (typeof rep.version === "number") elemVersion = rep.version;
+    await loadCatalog();
+    const loaded = (rep.loaded || []).length;
+    const errs = rep.errors || [];
+    const skipped = rep.skipped || [];
+    let msg = "元件定义已重载：" + loaded + " 个脚本元件";
+    if (skipped.length) msg += "，" + skipped.length + " 个被覆盖";
+    if (errs.length) msg += "，" + errs.length + " 个错误";
+    setStatus(msg, errs.length > 0);
+    renderDefinitionNotes(errs, skipped);
+    renderSceneList();
+    renderParams();
+  } catch (e) {
+    setStatus("重载元件定义失败: " + e.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// pollElements notices a reload that happened on the server (the watcher polls
+// the definition files) and pulls the catalog in, so writing a definition file
+// shows up in the page without any click. The element panel is only rebuilt
+// when the focus is elsewhere — never under the user's cursor while typing.
+async function pollElements() {
+  let info = null;
+  try {
+    const r = await fetch("/api/elements");
+    if (!r.ok) return;
+    info = await r.json();
+  } catch (e) {
+    return; // server restarting; try again on the next tick
+  }
+  if (typeof info.version !== "number") return;
+  if (elemVersion === null) { elemVersion = info.version; return; }
+  if (info.version === elemVersion) return;
+  elemVersion = info.version;
+  try { await loadCatalog(); } catch (e) { return; }
+  renderSceneList();
+  const overlay = $("#insertOverlay");
+  if (overlay && !overlay.hidden) renderInsertList($("#insFilter").value);
+  const act = document.activeElement;
+  if (!act || !act.closest || !act.closest("#paramPanel")) renderParams();
+  setStatus("元件定义已更新：" + (info.elements || []).length + " 个脚本元件");
+}
+
+// renderDefinitionNotes shows definition load problems where run warnings go;
+// the next run replaces them.
+function renderDefinitionNotes(errors, skipped) {
+  const box = $("#warnings");
+  const parts = [];
+  errors.forEach((e) => {
+    parts.push('<div class="w errbox">元件定义错误：' + escHtml(e.source) + " — " + escHtml(e.message) + "</div>");
+  });
+  skipped.forEach((s) => {
+    parts.push('<div class="w">元件定义被覆盖：' + escHtml(s.name || s.source) + " — " + escHtml(s.reason) + "</div>");
+  });
+  if (parts.length) box.innerHTML = parts.join("");
+}
+
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 }
 
 function renderGlobals() {
@@ -1582,8 +1742,8 @@ function renderInsertList(filter) {
   S.catalog.elements.forEach((d) => {
     if (f && !(d.label + d.type).toLowerCase().includes(f)) return;
     const b = document.createElement("button");
-    b.textContent = d.label + " (" + d.type + ")";
-    b.title = d.help || "";
+    b.textContent = d.label + " (" + d.type + ")" + (d.custom ? " · 脚本" : "");
+    b.title = (d.help || "") + (d.custom && d.source ? "\n定义文件：" + d.source : "");
     const myIdx = idx++;
     b.addEventListener("click", () => { insertComponent(d.type); });
     if (myIdx === S.insertSel) { b.classList.add("sel"); b.scrollIntoView({ block: "nearest" }); }
@@ -1661,8 +1821,10 @@ const HELP_ROWS = [
   ["输入框内", "原生输入：数字框支持科学计数法（如 1e-3）、↑/↓ 按步长步进；Enter 确认并移出焦点"],
   ["↑ / ↓", "选择上一个/下一个元件"],
   ["Shift+↑ / Shift+↓", "把当前元件沿光轴前后移动 5 mm（顺序由位置决定）"],
-  ["i", "插入新元件（输入文字过滤，Enter 插入）"],
+  ["i", "插入新元件（输入文字过滤，Enter 插入；来自定义文件的脚本元件带「· 脚本」标记）"],
   ["d / Delete", "删除当前元件"],
+  ["↻ 定义（按钮）", "重新扫描元件定义目录：新写或改好的 elements/*.json 立刻出现在插入列表里（也可直接改文件，服务端 ~2 秒内自动重载）"],
+  ["脚本元件预览", "选中脚本元件后点「掩膜预览」：按当前参数与网格宽度/波长绘制该元件的透过率 |t| 与包裹相位"],
   ["▶ 运行 / 空格 / Ctrl+Enter", "运行模拟（修改参数后不自动运行）"],
   ["q / e", "上一个 / 下一个输出平面"],
   ["1 - 8 / 0", "视图：1 图像 / 2 相位 / 3 偏振 / 4 |Ex|² / 5 |Ey|² / 6 |Ez|² / 7 相位Ex / 8 相位Ey / 0 立体视图"],
@@ -2405,6 +2567,9 @@ function wireUI() {
   $("#insFilter").addEventListener("input", () => { S.insertSel = 0; renderInsertList($("#insFilter").value); });
   $("#dupBtn").addEventListener("click", dupComp);
   $("#deleteBtn").addEventListener("click", delComp);
+  $("#reloadElemsBtn").addEventListener("click", (ev) => {
+    reloadElements(ev.currentTarget).catch((e) => setStatus("重载元件定义失败: " + e.message, true));
+  });
   $("#addSrcBtn").addEventListener("click", addSource);
   $("#dupSrcBtn").addEventListener("click", dupSource);
   $("#delSrcBtn").addEventListener("click", delSource);
@@ -2463,19 +2628,26 @@ function renderProfileBtn() {
 }
 
 // ---------------- init ----------------
+
+// loadCatalog fetches the documentation payload (element/source/example docs,
+// including the scripted elements currently loaded) into S.catalog.
+async function loadCatalog() {
+  const r = await fetch("/api/catalog");
+  if (!r.ok) throw new Error("catalog " + r.status);
+  const cat = await r.json();
+  cat.classes = cat.classes || {};
+  cat.polarizations = cat.polarizations || [{ key: "x", label: "线偏振 (x)" }];
+  S.catalog = cat;
+  return cat;
+}
+
 async function init() {
-  let cat = null;
   try {
-    const r = await fetch("/api/catalog");
-    if (!r.ok) throw new Error("catalog " + r.status);
-    cat = await r.json();
+    await loadCatalog();
   } catch (e) {
     setStatus("目录加载失败: " + e.message, true);
     return;
   }
-  S.catalog = cat;
-  S.catalog.classes = S.catalog.classes || {};
-  S.catalog.polarizations = S.catalog.polarizations || [{ key: "x", label: "线偏振 (x)" }];
   S.qconfig = typeof blankQuantumConfig === "function" ? blankQuantumConfig() : null;
 
   // 默认载入“迈克尔逊干涉仪”模板（若目录里有），否则用空白场景。
@@ -2500,6 +2672,8 @@ async function init() {
   renderPatternVisibility();
   clearInspect();
   run();
+  pollElements();
+  setInterval(pollElements, 5000);
 }
 
 init();

@@ -1,0 +1,16 @@
+{
+  "name": "sine_amp_grating",
+  "label": "正弦振幅光栅",
+  "help": "透过率 t(x) = (1 + m·cos(2πx/Λ)) / (1 + m) 的振幅光栅（朗奇光栅的连续版）：把平面波分成 0 级与 ±1 级，级次权重 1 : (m/2)² : (m/2)²。远场请用「傅里叶透镜 + 焦面探测器」几何。",
+  "behavior": "transmit",
+  "class": "other",
+  "params": [
+    {"key": "Lambda", "label": "光栅周期 Λ", "unit": "m", "kind": "float",
+     "min": 1e-6, "max": 1e-2, "step": 1e-6, "default": 1e-4,
+     "help": "级次位置 x_q = q·f·λ/Λ（焦面坐标）"},
+    {"key": "m", "label": "调制深度 m", "kind": "float",
+     "min": 0, "max": 1, "step": 0.05, "default": 0.8,
+     "help": "±1 级与 0 级的强度比 (m/2)²；(1+m) 归一化保证 t ≤ 1"}
+  ],
+  "amp": "(1 + m*cos(2*pi*x/Lambda)) / (1 + m)"
+}

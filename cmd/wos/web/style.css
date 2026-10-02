@@ -162,6 +162,20 @@ footer {
 #jsonMsg { color: var(--err); min-height: 1.2em; font-size: 12px; }
 .row { display: flex; gap: 8px; margin-top: 8px; }
 .row button { flex: 1; }
+.row button.mini { flex: none; font-size: 11px; padding: 4px 8px; }
+
+/* scripted elements (元件定义文件): definition link + mask preview */
+.previewBlock { margin: 4px 0 2px; }
+.previewHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: #6b8399;
+  background: transparent; border: 1px solid rgba(120,150,175,.5); border-radius: 4px; opacity: .85; }
+button.mini:hover { opacity: 1; color: #2c4b68; border-color: rgba(90,125,158,.9); background: rgba(233,242,250,.9); }
+button.mini.active { color: #14324a; border-color: var(--accent); background: #cfe3f7; opacity: 1; }
+.previewBlock .previewHead .hint { margin: 0; word-break: break-all; }
+.previewImgs { display: flex; gap: 8px; margin-top: 6px; }
+.previewImgs > div { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.previewImgs img { width: 100%; max-width: 118px; aspect-ratio: 1; image-rendering: pixelated;
+  background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; }
 
 /* quantum optics */
 .modeSwitch { display: flex; gap: 4px; }

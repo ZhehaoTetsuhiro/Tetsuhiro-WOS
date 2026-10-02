@@ -117,6 +117,15 @@ const (
 	behaviorSensor          // records the field and ends the beam
 )
 
+// The behaviour classes are exported for generated elements, which declare
+// theirs at registration time (RegisterGeneratedElement).
+const (
+	BehaviorTransmit = behaviorTransmit
+	BehaviorMirror   = behaviorMirror
+	BehaviorSplit    = behaviorSplit
+	BehaviorSensor   = behaviorSensor
+)
+
 // componentBehavior classifies a scene component type.
 func componentBehavior(t string) (int, error) {
 	switch t {
@@ -134,7 +143,13 @@ func componentBehavior(t string) (int, error) {
 		return 0, fmt.Errorf("light sources belong in the scene's sources list, not in components")
 	}
 	if _, ok := elementRegistry[t]; !ok {
-		return 0, fmt.Errorf("unknown scene component type %q", t)
+		if cd, ok := scriptedElementFor(t); ok {
+			return cd.behavior, nil
+		}
+		return 0, fmt.Errorf("unknown scene component type %q (a scripted element needs its definition file in elements/, see docs/KERNEL.md)", t)
+	}
+	if b, ok := elementBehaviorOverrides[t]; ok {
+		return b, nil
 	}
 	return behaviorTransmit, nil
 }
@@ -633,8 +648,18 @@ type SourceGeom struct {
 	Power      float64 `json:"power"`
 }
 
-// componentClass maps a type to a drawing class.
+// componentClass classifies a scene component for the GUI (colours and the
+// insert menu). A class declared by a scripted or generated element wins over
+// the built-in name lists below, which stay for the kernel's own types.
 func componentClass(t string) string {
+	if cd, ok := scriptedElementFor(t); ok {
+		return cd.class
+	}
+	for _, doc := range GeneratedElementDocs() {
+		if doc.Type == t && doc.Class != "" {
+			return doc.Class
+		}
+	}
 	switch t {
 	case "mirror", "concave_mirror", "convex_mirror", "retro_reflector":
 		return "mirror"
@@ -648,6 +673,45 @@ func componentClass(t string) string {
 		return "lens"
 	}
 	return "other"
+}
+
+// ComponentClasses maps every known component type to its GUI class
+// (lens/mirror/splitter/detector/stop/other), including scripted and generated
+// elements. The GUI reads it from the catalog instead of keeping a second,
+// drifting list.
+func ComponentClasses() map[string]string {
+	out := map[string]string{}
+	add := func(t string) {
+		if _, ok := out[t]; !ok {
+			out[t] = componentClass(t)
+		}
+	}
+	for name := range elementRegistry {
+		add(name)
+	}
+	for _, t := range []string{"sensor", "detector", "beamsplitter", "bs", "mirror",
+		"concave_mirror", "convex_mirror", "retro_reflector", "aperture", "iris",
+		"stop", "slit", "concave_lens", "axicon", "zone_plate", "spherical_mirror"} {
+		add(t)
+	}
+	// A declared class wins: it is the element's own statement about how it
+	// should be drawn, and it is the only class information a generated or
+	// scripted element has.
+	for _, doc := range GeneratedElementDocs() {
+		if doc.Class != "" {
+			out[doc.Type] = doc.Class
+		} else {
+			add(doc.Type)
+		}
+	}
+	for _, doc := range ScriptedElementDocs() {
+		if doc.Class != "" {
+			out[doc.Type] = doc.Class
+		} else {
+			add(doc.Type)
+		}
+	}
+	return out
 }
 
 // TraceScene routes the light path of a scene without running the wave

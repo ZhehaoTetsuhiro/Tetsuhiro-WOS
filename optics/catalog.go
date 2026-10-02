@@ -108,6 +108,14 @@ type ElementDoc struct {
 	Label  string      `json:"label"`
 	Help   string      `json:"help"`
 	Params []ParamSpec `json:"params"`
+	// Class is the GUI drawing class (lens/mirror/splitter/detector/stop/other)
+	// when the type declares one; classes omitted here fall back to the
+	// kernel's component classification.
+	Class string `json:"class,omitempty"`
+	// Custom marks an element that comes from a scripted definition file
+	// rather than from the kernel; Source is where it was loaded from.
+	Custom bool   `json:"custom,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 // sourceDocFor returns the catalog entry of a source type, or nil.
@@ -770,13 +778,14 @@ func sceneExamples(bl *BandlimitOpts) []Example {
 
 // Catalog is the full documentation payload served to the GUI.
 type Catalog struct {
-	Sources       []ElementDoc   `json:"sources"`
-	Elements      []ElementDoc   `json:"elements"`
-	Shapes        []ShapeDoc     `json:"shapes"`
-	Methods       []any          `json:"methods"`
-	Polarizations []any          `json:"polarizations"`
-	Quantum       QuantumCatalog `json:"quantum"`
-	Examples      []Example      `json:"examples"`
+	Sources       []ElementDoc      `json:"sources"`
+	Elements      []ElementDoc      `json:"elements"`
+	Shapes        []ShapeDoc        `json:"shapes"`
+	Methods       []any             `json:"methods"`
+	Polarizations []any             `json:"polarizations"`
+	Quantum       QuantumCatalog    `json:"quantum"`
+	Examples      []Example         `json:"examples"`
+	Classes       map[string]string `json:"classes,omitempty"`
 }
 
 // QuantumCatalog documents the quantum-optics states and gates.
@@ -854,8 +863,12 @@ func BuildQuantumCatalog() QuantumCatalog {
 
 // BuildCatalog assembles the catalog document.
 func BuildCatalog() Catalog {
-	cat := Catalog{Sources: SourceDocs, Elements: ElementDocs, Shapes: ShapeDocs(),
-		Quantum: BuildQuantumCatalog(), Examples: Examples()}
+	elements := append([]ElementDoc(nil), ElementDocs...)
+	elements = append(elements, GeneratedElementDocs()...)
+	elements = append(elements, ScriptedElementDocs()...)
+	cat := Catalog{Sources: SourceDocs, Elements: elements, Shapes: ShapeDocs(),
+		Quantum: BuildQuantumCatalog(), Examples: Examples(),
+		Classes: ComponentClasses()}
 	for _, m := range MethodDocs {
 		cat.Methods = append(cat.Methods, map[string]string{"key": m.Key, "label": m.Label, "help": m.Help})
 	}

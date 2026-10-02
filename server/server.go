@@ -4,6 +4,9 @@
 //
 //	GET  /api/catalog                          element/source/method/examples docs
 //	GET  /api/health                           liveness
+//	GET  /api/elements                         loaded scripted elements (定义文件)
+//	POST /api/elements/reload                  rescan the definition directories
+//	GET  /api/elements/{name}/preview.png?kind=amp|phase   operator mask preview
 //	POST /api/validate                         config validation issues
 //	POST /api/simulate                         submit a config -> 202 {run_id}
 //	GET  /api/runs/{id}                        run status + result metadata
@@ -110,6 +113,14 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, optics.BuildCatalog())
+	})
+	mux.HandleFunc("/api/elements", func(w http.ResponseWriter, r *http.Request) {
+		// Exact path: the list of loaded scripted elements.
+		s.handleElements(w, r)
+	})
+	mux.HandleFunc("/api/elements/", func(w http.ResponseWriter, r *http.Request) {
+		// reload and {name}/preview.png live under the slash.
+		s.handleElements(w, r)
 	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now().Format(time.RFC3339)})

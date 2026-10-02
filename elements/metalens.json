@@ -1,0 +1,21 @@
+{
+  "name": "metalens",
+  "label": "超表面透镜（双曲相位）",
+  "help": "把设计波长 λ0 下的双曲相位掩模 φ(r) = -(2π/λ0)·(√(r²+f²) − f) 写进元件：在 λ0 处严格聚焦到 f，其它波长按衍射规律移到 f·λ0/λ（色散）。元件轮廓即通光孔径。",
+  "behavior": "transmit",
+  "class": "lens",
+  "params": [
+    {"key": "f", "label": "设计焦距 f", "unit": "m", "kind": "float",
+     "min": 1e-3, "max": 10, "step": 1e-3, "default": 0.3,
+     "help": "设计波长下的焦距"},
+    {"key": "wl0", "label": "设计波长 λ0", "unit": "m", "kind": "float",
+     "min": 1e-9, "max": 1e-5, "step": 1e-9, "default": 6.328e-7,
+     "help": "元件的相位按这个波长写死；实际焦点 z = f·λ0/λ"},
+    {"key": "sign", "label": "会聚/发散", "kind": "choice",
+     "choices": ["1", "-1"], "default": "1",
+     "help": "1 = 会聚（正透镜），-1 = 发散（负透镜）"}
+  ],
+  "phase": "-sign*(2*pi/wl0)*(sqrt(r*r+f*f) - f)",
+  "phase_unit": "rad",
+  "amp": "1"
+}
