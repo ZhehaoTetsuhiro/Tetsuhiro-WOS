@@ -2,7 +2,7 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [v1.1.0] - 2026-10-02
 
 ### 新增
 
@@ -242,7 +242,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...HEAD
+[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...HEAD
+[v1.1.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...v1.0.0
