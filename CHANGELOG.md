@@ -2,6 +2,31 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **脚本元件（元件定义文件）：不写 Go、不重编译就能做出新的光学元件**。把元件的复透过率写成 `elements/<名字>.json` 的表达式（`phase` / `amp` / 可选 `jones` + `params`），加载后即与内置元件同等可用：出现在 GUI 插入对话框与参数面板、可写进场景 JSON、可走 Go API。
+  - **表达式语言**（`optics/expr.go`，自研零依赖）：变量 `x y r th wl k pi e` 与元件参数；`+ - * / % ^`、比较/逻辑（真值 1/0）与 30 个函数；`if(c,a,b)` **惰性**求值（可守住奇异点）；错误带列号。
+  - **加载与热重载**：搜索路径先可执行文件旁 `elements/`，再工作目录 `elements/`、`~/.wos/elements/`，`-elements dir` 追加且优先级最高（后者覆盖前者；与内置重名直接报错）；服务端每 2 秒按 mtime 自动重载并逐文件记日志，GUI 有「↻ 定义」按钮、页面按版本号自动拉取；`wos -check-elements` 只校验、任何错误以退出码 1 结束。
+  - **加载期探针校验**：在 33×33 探针网格上试算，除零/负数开方等非有限值当场报错（带列号与坐标），不让 NaN 进入运行。
+  - **掩膜预览**：`GET /api/elements/{name}/preview.png?kind=amp|phase&…` 按当前参数画 |t| 与包裹相位（低透过处按掩膜留空，与平面视图同约定）；GUI 参数面板里以两联图呈现，改参数即刷新。
+  - **定型为原生元件**：`wos -gen-go elements/x.json -gen-name NAME` 打印等价的原生 Go 元件（表达式内联、`if` 提升为语句保持惰性、常量折叠、注册工厂/目录条目/路由行为）；`optics/elemgen_metalens.go` 即由它生成，`optics/elemgen_test.go` 锁定「文件 == 当前生成器输出」且与脚本版在元件面与传播后逐像素一致（1e-12）。
+  - **性能**：表达式编译为闭包并按行多核并行求值，实测 1024² 网格约 39 ms / 次施加（同一运行中单相干单元传播约 0.9 s）。
+  - **示例定义**：`elements/metalens.json`（超表面透镜：设计波长下的双曲相位，焦点按 f·λ0/λ 色散）与 `elements/sine_amp_grating.json`（正弦振幅光栅：级次权重 1 : (m/2)² : (m/2)²），均配解析判据回归测试。
+- **`/api/catalog` 增加 `classes`（各类型的绘图类别）与脚本元件的 `custom`/`source`/`class` 标记**：前端不再维护第二份类别表（原先前端的硬编码表把 `spherical_mirror`、`concave_lens` 落到了 "other"）。
+- **新增 `/api/elements` 三个端点**：列表（含 `version`）、`POST …/reload` 重扫并逐文件报告、`…/{name}/preview.png` 掩膜图，见 docs/API.md。
+
+### 修复
+
+- **部分反射镜的返回光不再静默消失（访问合并键用错了方向）**：一次“访问”原先按参考方向合并，而镜面的参考方向被写成**折转方向**（输出方向）——平面平行间隙/腔的返回光恰好沿该方向返回，于是返回光被并进**已经出射过**的第一次访问，不再产生任何出射：路由里镜子命中 2 次而光束列表在返回处截止，`mirror(reflectivity=0.2)` 的双程干涉记录成纯反射光的平场。现在合并键与相对倾角参考都用**到达方向**（`optics/scene.go` 的 `matchVisit`，`refDir` 字段随之删除）：返回光获得自己的访问并正常出射，`mirror` 与 `beamsplitter` 两种“部分反射”写法给出同类条纹；镜面双程不再需要 beamsplitter 绕法。回归测试 `TestScenePartialMirrorLaunchesReturnPass`（4 条出射光/2 条到达观察面）与 `TestScenePartialMirrorGapInterference`（条纹对比度+暗环级次+告警）。
+- **环路光路的求值顺序改为依赖序，被跳过的贡献必定告警**：访问图成环时拓扑排序无法完成，旧实现回退“最早到达序”，观察面放得比间隙往返**近**时会在返回访问之前被求值，返回波因场未生成被 merge 跳过——静默丢光、无警告（平场）。现在环内访问按**强连通分量的依赖序**求值（环内按到达序，即首次往返的因果顺序），首次往返总能完整求值；更晚的往返沿闭合环的边被跳过时由 merge 计数，并产生告警 `scene_cycle_dropped`（“环路光路只计入首次往返：N 条再次往返的贡献被跳过（结果为两光束近似）”）。观察面距离不再影响结果——`TestSceneGapInterferenceObserverOrder` 用 mirror/beamsplitter × 观察面近/远四种组合锁定（旧代码下 mirror 近/远、splitter 近均失败，splitter 远即当时的绕法）。**上限不变**：多次往返仍按首次往返截断（两光束近似），高反射率腔的多光束（Airy）效应不在结果中。
+
+### 校验
+
+- `go test ./optics/ -count=1` 全通过；`go vet`、`gofmt -l` 干净。
+- 解析比对（两光束间隙干涉）：对比度 min/max 实测 0.4286–0.4331，理论 ((t²−r)/(t²+r))² = 0.4291（振幅 0.2/0.96）；暗环级次 r²/((R_eff+2L)·λ) 落在半整数（mirror，实系数）或四分之一偏移（splitter，i·√R）上，级距 1.00±0.15；观察面距离从 0.5 mm 变到 3.5 mm，首个暗环半径相对变化 < 2%。
+
 ## [v1.0.2] - 2026-10-01
 
 ### 修复
@@ -217,7 +242,7 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[Unreleased]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...HEAD
+[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...HEAD
 [v1.0.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.0...v1.0.1
 [v1.0.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v0.3.3...v1.0.0

@@ -92,11 +92,15 @@ type sceneSim struct {
 	visits  []*sceneVisit
 	planes  []*Plane
 	nPl     int
+	// dropped counts contributions of this unit that the merge had to skip
+	// because their producer visit is evaluated later (a cycle-closing edge,
+	// i.e. a further round trip): the run reports them as a warning.
+	dropped int
 	wlKey   int64
 	group   string
 }
 
-// sortVisits returns the visits in a topological order of the beam graph: a
+// sortVisits returns the visits in an evaluation order of the beam graph: a
 // visit is evaluated only after every visit that launches a beam into it, so
 // all of its contributions are on the grid by the time it is merged.
 //
@@ -104,6 +108,16 @@ type sceneSim struct {
 // and a long one has an arrival earlier than the long path's producer, and the
 // long contribution would be missing (half the power silently lost in a
 // Michelson with unequal arms).
+//
+// A recirculating layout (a resonance cavity) makes the graph cyclic and no
+// order satisfies every edge. The visits the Kahn pass cannot order are then
+// emitted in dependency order (the strongly connected components come out
+// producers-first), so the *first* round trip through the loop is always
+// complete; only a contribution whose producer is evaluated later — an edge
+// that closes a cycle, i.e. a further round trip — is skipped. The merge
+// counts those skips and the run reports them (scene_cycle_dropped), so light
+// is never dropped silently; the result is the two-beam (first round trip)
+// approximation.
 func sortVisits(g *sceneGraph) []*sceneVisit {
 	indeg := make(map[*sceneVisit]int, len(g.visits))
 	for _, v := range g.visits {
@@ -113,16 +127,13 @@ func sortVisits(g *sceneGraph) []*sceneVisit {
 			}
 		}
 	}
-	byArrival := func(vs []*sceneVisit) {
-		sort.SliceStable(vs, func(i, j int) bool { return vs[i].arrival < vs[j].arrival })
-	}
 	var ready []*sceneVisit
 	for _, v := range g.visits {
 		if indeg[v] == 0 {
 			ready = append(ready, v)
 		}
 	}
-	byArrival(ready)
+	sortVisitsByArrival(ready)
 	order := make([]*sceneVisit, 0, len(g.visits))
 	seen := make(map[*sceneVisit]bool, len(g.visits))
 	for len(ready) > 0 {
@@ -143,22 +154,99 @@ func sortVisits(g *sceneGraph) []*sceneVisit {
 				next = append(next, t)
 			}
 		}
-		byArrival(next)
+		sortVisitsByArrival(next)
 		ready = append(ready, next...)
 	}
 	if len(order) < len(g.visits) {
-		// A cycle (a resonant cavity) never drops to zero in-degree: fall back
-		// to the arrival order for the remainder so it is still evaluated.
 		var rest []*sceneVisit
 		for _, v := range g.visits {
 			if !seen[v] {
 				rest = append(rest, v)
 			}
 		}
-		byArrival(rest)
-		order = append(order, rest...)
+		order = append(order, cycleOrder(rest)...)
 	}
 	return order
+}
+
+// sortVisitsByArrival orders visits by their earliest arrival; ties keep the
+// input order (the routing order), which keeps the evaluation deterministic.
+func sortVisitsByArrival(vs []*sceneVisit) {
+	sort.SliceStable(vs, func(i, j int) bool { return vs[i].arrival < vs[j].arrival })
+}
+
+// cycleOrder orders a cyclic remainder — every one of these visits is in a
+// cycle or downstream of one, so the Kahn pass could not place any of them —
+// in dependency order: Kosaraju's algorithm emits the strongly connected
+// components in topological order of their condensation (a component that
+// consumes beams from another comes after it), and the members of one
+// component go in arrival order, which is the causal order of the first
+// traversal through the loop.
+//
+// The edges that close a cycle cannot all be honoured, whatever the order is:
+// where a producer ends up later than its consumer, the merge finds no field
+// and counts the skipped contribution. Inside one component those edges are
+// exactly the second and further round trips.
+func cycleOrder(rest []*sceneVisit) []*sceneVisit {
+	inRest := make(map[*sceneVisit]bool, len(rest))
+	for _, v := range rest {
+		inRest[v] = true
+	}
+	sortVisitsByArrival(rest)
+	// First pass: finish order of a DFS over the subgraph.
+	state := make(map[*sceneVisit]int, len(rest)) // 0 white, 1 grey, 2 black
+	var finish []*sceneVisit
+	var dfs1 func(v *sceneVisit)
+	dfs1 = func(v *sceneVisit) {
+		state[v] = 1
+		for _, b := range v.out {
+			if t := b.visit; t != nil && inRest[t] && state[t] == 0 {
+				dfs1(t)
+			}
+		}
+		state[v] = 2
+		finish = append(finish, v)
+	}
+	for _, v := range rest {
+		if state[v] == 0 {
+			dfs1(v)
+		}
+	}
+	// Second pass: DFS the transpose in decreasing finish order; each tree is
+	// one strongly connected component, and the trees come out producers
+	// first.
+	trans := make(map[*sceneVisit][]*sceneVisit, len(rest))
+	for _, v := range rest {
+		for _, in := range v.in {
+			if p := in.beam.producer; p != nil && inRest[p] {
+				trans[v] = append(trans[v], p)
+			}
+		}
+	}
+	seen := make(map[*sceneVisit]bool, len(rest))
+	out := make([]*sceneVisit, 0, len(rest))
+	var component []*sceneVisit
+	var dfs2 func(v *sceneVisit)
+	dfs2 = func(v *sceneVisit) {
+		seen[v] = true
+		component = append(component, v)
+		for _, p := range trans[v] {
+			if !seen[p] {
+				dfs2(p)
+			}
+		}
+	}
+	for i := len(finish) - 1; i >= 0; i-- {
+		v := finish[i]
+		if seen[v] {
+			continue
+		}
+		component = component[:0]
+		dfs2(v)
+		sortVisitsByArrival(component)
+		out = append(out, component...)
+	}
+	return out
 }
 
 func (s *sceneSim) run() error {
@@ -238,6 +326,17 @@ func (s *sceneSim) merge(v *sceneVisit) (*Field, error) {
 	for _, in := range v.in {
 		f := s.fields[in.beam.id]
 		if f == nil {
+			// A contribution whose source belongs to this unit but whose field
+			// is not on the grid is light this evaluation cannot include: the
+			// producer visit is evaluated later, i.e. the beam runs along an
+			// edge that closes a cycle. Skipping it is the bounded-round-trip
+			// contract; count it so the run reports the truncation instead of
+			// losing light silently. Contributions from other units are
+			// skipped silently on purpose — they are added incoherently at the
+			// end.
+			if s.unitSet[in.beam.src] {
+				s.dropped++
+			}
 			continue
 		}
 		g := f.Clone()
@@ -270,7 +369,7 @@ func (s *sceneSim) merge(v *sceneVisit) (*Field, error) {
 		}
 		// Relative wavefront tilt of this contribution (misalignment fringes).
 		if v.deviation(in.beam.dir, geom) != 0 {
-			d := in.beam.dir.Sub(v.refDir)
+			d := in.beam.dir.Sub(v.inDir)
 			g.ApplyLinearPhase(k, d.Dot(geom.u), d.Dot(geom.v))
 		}
 		for i := range out.Ex {
@@ -291,11 +390,12 @@ func (s *sceneSim) merge(v *sceneVisit) (*Field, error) {
 }
 
 // deviation reports whether the relative-tilt phase should be applied for a
-// contribution: only small direction differences are treated as misalignment
-// (large ones are the design fold, e.g. a 90° mirror, where the wavefront is
-// carried through unchanged).
+// contribution: it is measured against the visit's first arrival, and only
+// small direction differences are treated as misalignment (large ones are the
+// design fold, e.g. a 90° mirror, where the wavefront is carried through
+// unchanged).
 func (v *sceneVisit) deviation(dir Vec3, geom compGeom) float64 {
-	d := dir.Sub(v.refDir)
+	d := dir.Sub(v.inDir)
 	n := d.Norm()
 	if n < 1e-6 {
 		return 0
@@ -464,6 +564,7 @@ func SimulateScene(cfg Config) (*Result, error) {
 
 	var planes []*Plane
 	parts := map[string][]PlanePart{}
+	dropped := 0
 	for _, u := range units {
 		wl := cfg.Wavelength
 		for _, si := range u.sources {
@@ -485,6 +586,7 @@ func SimulateScene(cfg Config) (*Result, error) {
 		if err := sim.run(); err != nil {
 			return nil, err
 		}
+		dropped += sim.dropped
 		planes = mergeUnitPlanes(planes, sim.planes)
 		for _, pl := range sim.planes {
 			parts[pl.ID] = append(parts[pl.ID], PlanePart{
@@ -493,6 +595,16 @@ func SimulateScene(cfg Config) (*Result, error) {
 				Ex: pl.Ex, Ey: pl.Ey, Ez: pl.Ez,
 			})
 		}
+	}
+	// A recirculating light path is evaluated as its first round trip only
+	// (round trips are bounded, see sortVisits): every contribution skipped
+	// along a cycle-closing edge was counted by the merge. Never let that be
+	// silent — the result is the two-beam approximation, not the full Airy
+	// sum.
+	if dropped > 0 {
+		base.Warnings.Add("scene_cycle_dropped",
+			fmt.Sprintf("环路光路只计入首次往返：%d 条再次往返的贡献被跳过（结果为两光束近似）", dropped),
+			float64(dropped))
 	}
 	finishPlanes(planes, parts)
 	return &Result{

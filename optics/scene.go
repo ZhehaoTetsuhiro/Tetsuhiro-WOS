@@ -203,12 +203,11 @@ type sceneIncoming struct {
 type sceneVisit struct {
 	id       int
 	comp     int
-	src      int // source that first reached this interaction (-1 = unknown)
-	inDir    Vec3
+	src      int     // source that first reached this interaction (-1 = unknown)
+	inDir    Vec3    // direction of the first arrival: the visit's key and tilt reference
 	arrival  float64 // earliest arrival path length (sorts the evaluation)
 	in       []sceneIncoming
 	out      []*sceneBeam
-	refDir   Vec3 // reference direction for relative-tilt bookkeeping
 	arriveAt Vec3 // arrival point of the earliest contribution
 	launched bool // outgoing beams have been created
 }
@@ -235,15 +234,20 @@ type sceneGraph struct {
 	wl float64
 }
 
-// sceneDirKey buckets a direction so that beams that are collinear (to within
-// 1e-4 rad) share a visit.
 // matchVisit returns the visit of a component that a beam travelling in dir
-// belongs to: the first whose reference direction is within the misalignment
+// belongs to: the first whose *arrival* direction is within the misalignment
 // angle (sceneTiltDesignFold). Contributions that close in angle this way are
 // the same beam — their fields are summed coherently at the component and the
 // residual difference is applied as a wavefront tilt — while a larger
 // difference is a design fold (a 90° mirror, say) and gets its own visit, so
 // beams that are not meant to interfere are never mixed.
+//
+// The stored direction must be an arrival direction, never the direction the
+// merged beam leaves in: a beam returning through a plane-parallel gap or
+// cavity arrives exactly along the forward pass's fold direction, and an
+// arrival-vs-fold comparison merged that second pass into the forward
+// interaction — which had already been launched, so the return wave was never
+// emitted (a partial-reflector double pass came out as a flat field).
 func (g *sceneGraph) matchVisit(comp int, dir Vec3) *sceneVisit {
 	best := -1
 	bestAng := math.Inf(1)
@@ -252,7 +256,7 @@ func (g *sceneGraph) matchVisit(comp int, dir Vec3) *sceneVisit {
 		if v.comp != comp {
 			continue
 		}
-		ang := v.refDir.Sub(dir).Norm()
+		ang := v.inDir.Sub(dir).Norm()
 		if ang <= sceneTiltDesignFold && ang < bestAng {
 			best, bestAng = i, ang
 		}
@@ -426,26 +430,7 @@ func (g *sceneGraph) addVisit(comp int, inDir Vec3, b *sceneBeam, segLen float64
 		v.arriveAt = hit
 	}
 	v.in = append(v.in, sceneIncoming{beam: b, segLen: segLen})
-	v.refDir = g.referenceDir(v)
 	return v
-}
-
-// referenceDir returns the direction a contribution is compared against when
-// the relative wavefront tilt is evaluated: the direction the merged beam
-// continues in (the fold direction for mirrors, the incoming direction for
-// transmissive components).
-func (g *sceneGraph) referenceDir(v *sceneVisit) Vec3 {
-	switch g.behavior[v.comp] {
-	case behaviorMirror:
-		return reflectDir(v.inDir, g.geoms[v.comp].n)
-	case behaviorSensor:
-		// sensors record whatever arrives: compare against the first
-		// contribution, updated as more arrive.
-		if len(v.in) > 0 {
-			return v.in[0].beam.dir
-		}
-	}
-	return v.inDir
 }
 
 // launch creates the outgoing beams of a visit.

@@ -75,7 +75,7 @@ state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / th
 
 - path 为臂路径（"" = 主光路，bs0 = 第 1 分束臂……）。
 - stats 单位为 SI：power W、peak/intensity W/m²、质心/RMS m、strehl 无量纲（未启用时为 0）。
-- warnings 常见码：fresnel_tf_alias、fresnel_ir_alias、fraunhofer_nearfield、asm_alias_wrap、evanescent_filtered、backward_evanescent（含义见 docs/PHYSICS.md）。
+- warnings 常见码：fresnel_tf_alias、fresnel_ir_alias、fraunhofer_nearfield、asm_alias_wrap、evanescent_filtered、backward_evanescent、scene_cycle_dropped（含义见 docs/PHYSICS.md）。
 
 ## GET /api/runs/{id}/planes/{pid}
 
