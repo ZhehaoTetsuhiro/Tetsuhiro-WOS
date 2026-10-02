@@ -5,7 +5,7 @@
 - **数值内核**：自研并行 FFT、角谱法（ASM，亥姆霍兹方程精确解，含 **零填充 `asm_pad`**、**离轴频移 `asm_shift`** 与 **频移+零填充 `asm_shift_pad`** 高精度变体，支持非 2 的幂网格（Bluestein FFT））、菲涅耳（两种形式）、夫琅禾费远场；衰逝波处理、奈奎斯特带限正则化、菲涅耳数/采样有效性自动告警。
 - **高级传播算法**：**全矢量角谱法**（`method=vectorial`，重构纵向分量 Ez，非傍轴）、**非均匀/复折射率介质**（split-step BPM，分层/梯度/吸收/增益介质）、**宽带谱叠加**（polychromatic，逐波长非相干叠加）、**部分相干光**（Gaussian Schell 模型）、**各向异性/双折射介质**（单轴晶体 `uniaxial`、Berreman 4×4 双轴晶体 `biaxial`）、**3-D 体传播**（一次传播到多个 z，输出 x,y,z 体积场）。
 - **光学元件**：20+ 种可调参数元件（透镜、光阑、光栅、轴锥镜、波带片、涡旋相位板、楔形棱镜、漫射体、反射镜、凹面镜、凸面镜、泽尼克像差板、偏振片、波片、旋光片、自定义琼斯矩阵、分束器、合束器、单轴晶体、均匀介质、双轴晶体……），全部参数可调。
-- **脚本元件（元件定义文件）**：把新元件的复透过率直接写成 `elements/<名字>.json` 里的**表达式**（`phase`/`amp`/可选琼斯矩阵 + 参数表），加载后与内置元件同等可用——出现在 GUI 插入对话框与参数面板、可写进场景 JSON、可走 Go API，**不需要重编译或重启**；服务端按 mtime 自动热重载，GUI 有「↻ 定义」按钮与「掩膜预览」（|t| 与包裹相位）。定型后可 `wos -gen-go elements/x.json -gen-name NAME` 打印等价的原生 Go 元件入库。示例：`elements/metalens.json`（超表面透镜）、`elements/sine_amp_grating.json`（正弦振幅光栅）。
+- **脚本元件（元件定义文件）**：把新元件的复透过率直接写成 `elements/<名字>.json` 里的**表达式**（`phase`/`amp`/可选琼斯矩阵 + 参数表），加载后与内置元件同等可用——出现在 GUI 插入对话框与参数面板、可写进场景 JSON、可走 Go API，**不需要重编译或重启**；服务端每 2 秒比对定义集合（新增、改写、删除都会跟上）自动热重载，GUI 有「↻ 定义」按钮与「掩膜预览」（|t| 与包裹相位）。定型后可 `wos -gen-go elements/x.json -gen-name NAME` 打印等价的原生 Go 元件入库。示例：`elements/metalens.json`（超表面透镜）、`elements/sine_amp_grating.json`（正弦振幅光栅）。
 - **量子光学**：Fock 基线性光学内核（Fock/相干/压缩/双模压缩/热态、相移/分束器/位移/压缩/损耗门），光子数分布、g²(0)、正交分量、联合分布——Hong-Ou-Mandel、单光子马赫-曾德尔、压缩、EPR、混合态/损耗等效应可复现，并支持 PNG/SVG 图表导出（docs/QUANTUM.md）。
 - **定位场景光路（1.0 光路模型）**：光路存储**元件的位置与几何形状**（`scene.components[]`：pos/yaw/pitch/roll/shape/params），而非“依次经过的元件序列”；光路由最近命中与反射/透射几何**推导**，元件顺序由位置决定。元件带真实轮廓（圆/方/矩形/椭圆/三角/环/多边形/双缝/十字/星形/超椭圆/自定义顶点/细缝），轮廓即通光孔径。旧的元件序列配置可一键自动转换为定位场景（`POST /api/convert`，GUI 载入旧预设时自动完成）。
 - **多光源与相干分组**：`sources[]` 任意多个光源，各有位置/方向/波长/功率/偏振与相干组；同组同波长相干叠加（产生干涉条纹），不同组/不同波长按强度叠加；每个平面保留各光源单元的复场，可按通道单独查看。
@@ -21,8 +21,8 @@
 
 本项目分两个发布通道：
 
-- **Release**（`v1.1.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.0`，`docker/podman run` 直接运行。
+- **Release**（`v1.1.1`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.1`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -33,8 +33,8 @@
 
 容器镜像：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.0
-    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.0
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.1
+    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.1.1
 
 ## 快速开始
 
@@ -45,7 +45,7 @@
 > Windows 交叉编译：GOOS=windows GOARCH=amd64 go build -o wos.exe ./cmd/wos
 
 元件定义文件（脚本元件）放在 `elements/`（可执行文件旁、当前目录或 `~/.wos/elements/`，
-也可用 `-elements 目录` 追加）：写好后在 GUI 里点「↻ 定义」或等 2 秒自动重载；
+也可用 `-elements 目录` 追加）：写好后在 GUI 里点「↻ 定义」或等几秒自动重载（**删除定义文件也会自动跟上**）；
 `./wos -check-elements` 只校验定义文件（错误以退出码 1 结束），
 `./wos -gen-go elements/metalens.json -gen-name my_lens` 把定义打印成等价的原生 Go 元件。
 

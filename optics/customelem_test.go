@@ -253,6 +253,76 @@ func TestScriptedReloadReplaces(t *testing.T) {
 	}
 }
 
+// The auto-reload watcher compares DefinitionDirsSignature between polls, so a
+// deletion or an overwrite must change it. The newest-mtime fingerprint this
+// replaced could only rise: removing the most recently written definition left
+// the signature unchanged and the deleted element stayed registered.
+func TestDefinitionDirsSignatureTracksAddEditRemove(t *testing.T) {
+	dir := t.TempDir()
+	empty := DefinitionDirsSignature([]string{dir})
+
+	writeDef(t, dir, "metalens", metalensJSON)
+	added := DefinitionDirsSignature([]string{dir})
+	if added == empty {
+		t.Fatal("adding a definition must change the signature")
+	}
+
+	writeDef(t, dir, "metalens", strings.Replace(metalensJSON, "超表面透镜", "改过的透镜", 1))
+	edited := DefinitionDirsSignature([]string{dir})
+	if edited == added {
+		t.Fatal("editing a definition must change the signature")
+	}
+
+	if err := os.Remove(filepath.Join(dir, "metalens.json")); err != nil {
+		t.Fatal(err)
+	}
+	removed := DefinitionDirsSignature([]string{dir})
+	if removed == edited {
+		t.Fatal("removing a definition must change the signature")
+	}
+	if removed != empty {
+		t.Fatalf("a directory returned to its earlier contents must fingerprint the same again:\n%q\n%q", removed, empty)
+	}
+
+	// A poller that sees a changed signature reloads; the reload must drop it.
+	reloadInto(t, dir)
+	if _, ok := ScriptedDefinition("metalens"); ok {
+		t.Fatal("the deleted definition is still registered after a reload")
+	}
+
+	// A missing directory is not a change signal by itself, but it must not
+	// panic and must fingerprint stably.
+	gone := filepath.Join(dir, "does-not-exist")
+	if DefinitionDirsSignature([]string{gone}) != DefinitionDirsSignature([]string{gone}) {
+		t.Fatal("fingerprint of a missing directory must be stable")
+	}
+
+	// Only .json files count: an unrelated file dropped in the directory must
+	// not look like a definition change, or every stray temp file reloads.
+	writeDef(t, dir, "metalens", metalensJSON)
+	before := DefinitionDirsSignature([]string{dir})
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if after := DefinitionDirsSignature([]string{dir}); after != before {
+		t.Fatal("a non-definition file must not change the fingerprint")
+	}
+}
+
+// A definition overwritten with byte-identical size still changes the
+// fingerprint (mtime carries it), which is what makes a poll reliable for
+// editors that rewrite a file in place.
+func TestDefinitionDirsSignatureSeesSameSizeEdit(t *testing.T) {
+	dir := t.TempDir()
+	writeDef(t, dir, "metalens", metalensJSON)
+	first := DefinitionDirsSignature([]string{dir})
+	writeDef(t, dir, "metalens", strings.Replace(metalensJSON, "超表面透镜", "覆盖过的透镜", 1))
+	second := DefinitionDirsSignature([]string{dir})
+	if first == second {
+		t.Fatal("an in-place rewrite must change the signature")
+	}
+}
+
 // A component of an unloaded scripted type reports where to look.
 func TestUnknownScriptedTypeMessage(t *testing.T) {
 	reloadInto(t, t.TempDir())

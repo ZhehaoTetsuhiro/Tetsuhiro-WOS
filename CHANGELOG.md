@@ -2,6 +2,17 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.1.1] - 2026-10-02
+
+### 修复
+
+- **删掉元件定义文件后不必再点「↻ 定义」**：自动重载原先只跟踪定义目录里**最新**的文件 mtime（`DefinitionDirsMTime`）——删除的恰好是最近写过的那个定义时，"最新 mtime" 只会变小，"有没有变化"的判断因此看不到任何动静，被删的脚本元件会一直留在插入列表与元件目录里，直到点一次「↻ 定义」或重启进程（**新增与修改**一直正常，只有删除会漏）。现在改为比对**定义集合的指纹**：每个 `.json` 的**文件名、大小、修改时间**，按目录分组、排序后连成一个字符串（`optics/customelem.go` 的 `DefinitionDirsSignature`，取代 `DefinitionDirsMTime`；`cmd/wos/main.go` 的 `watchElements` 比较指纹而非 mtime）。新增、改名、原地改写、删除都会让指纹变化并触发重载；非 `.json` 文件（编辑器临时文件、笔记）不参与指纹，不会造成无谓重载。回归测试 `TestDefinitionDirsSignatureTracksAddEditRemove`（新增/改写/删除都改变指纹、删到与初始相同的目录内容指纹复原、删除后重载确实注销该元件、缺失目录指纹稳定、非 json 文件不改变指纹）与 `TestDefinitionDirsSignatureSeesSameSizeEdit`（原地重写即使大小不变也要被发现）。
+
+### 校验
+
+- `go test ./...` 全通过；`go vet ./...`、`gofmt -l` 干净。
+- 发布二进制的自动重载实测（真 HTTP 轮询 `/api/elements` 的版本号与列表）：新增定义文件 **1.6 s** 出现、改写 **2.0 s** 更新、**删除 2.0 s** 消失；与内置重名的定义仍被拒并逐文件报错（`name "lens" is already a built-in component`）。
+
 ## [v1.1.0] - 2026-10-02
 
 ### 新增
@@ -242,7 +253,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...HEAD
+[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...HEAD
+[v1.1.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...v1.1.1
 [v1.1.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...v1.0.2
 [v1.0.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.0...v1.0.1

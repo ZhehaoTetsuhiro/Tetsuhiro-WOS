@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -784,30 +783,46 @@ func ParamsFromStrings(name string, raw map[string]string) (map[string]any, erro
 	return out, nil
 }
 
-// DefinitionDirsMTime returns the newest modification time among the definition
-// files in dirs (the zero time when there are none). A caller can poll it to
-// notice an edited definition without a filesystem-watch dependency.
-func DefinitionDirsMTime(dirs []string) time.Time {
-	var newest time.Time
+// DefinitionDirsSignature fingerprints the definition files in dirs: each
+// directory's path, then every .json file's name, size and modification time,
+// in sorted order. Two calls differ whenever a definition is added, edited or
+// removed, which is what a poller needs — the newest-file modification time it
+// replaces could only ever rise, so deleting the most recently written
+// definition looked like "no change" and the deleted element stayed registered
+// until a restart (or an explicit reload). Only .json files count, so dropping
+// an unrelated file into the directory does not trigger a reload.
+func DefinitionDirsSignature(dirs []string) string {
+	var b strings.Builder
 	for _, dir := range dirs {
+		b.WriteString(dir)
+		b.WriteByte('\n')
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
+		var files []string
 		for _, ent := range entries {
 			if ent.IsDir() || !strings.HasSuffix(strings.ToLower(ent.Name()), ".json") {
 				continue
 			}
-			info, err := ent.Info()
+			files = append(files, ent.Name())
+		}
+		sort.Strings(files)
+		for _, name := range files {
+			info, err := os.Stat(filepath.Join(dir, name))
 			if err != nil {
+				b.WriteString(name + "	missing\n")
 				continue
 			}
-			if info.ModTime().After(newest) {
-				newest = info.ModTime()
-			}
+			b.WriteString(name)
+			b.WriteByte('	')
+			b.WriteString(strconv.FormatInt(info.Size(), 10))
+			b.WriteByte('	')
+			b.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
+			b.WriteByte('\n')
 		}
 	}
-	return newest
+	return b.String()
 }
 
 // ScriptedElementsVersion returns a counter that increments on every reload of

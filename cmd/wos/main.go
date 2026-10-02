@@ -115,18 +115,20 @@ func logElementReport(rep optics.DefinitionReport) {
 	}
 }
 
-// watchElements reloads the definition directories whenever a file changes.
-// A plain modification-time poll keeps the kernel dependency-free.
+// watchElements reloads the definition directories whenever their contents
+// change. A plain fingerprint poll keeps the kernel dependency-free; it
+// compares the whole definition set, so a deleted or overwritten definition is
+// noticed as well as an edited or new one.
 func watchElements() {
 	dirs := optics.ElementDirs()
-	last := optics.DefinitionDirsMTime(dirs)
+	last := optics.DefinitionDirsSignature(dirs)
 	for {
 		time.Sleep(2 * time.Second)
-		m := optics.DefinitionDirsMTime(dirs)
-		if !m.After(last) {
+		sig := optics.DefinitionDirsSignature(dirs)
+		if sig == last {
 			continue
 		}
-		last = m
+		last = sig
 		log.Printf("元件定义有变化，重新加载…")
 		logElementReport(optics.ReloadElementDefinitions(nil))
 	}

@@ -160,7 +160,7 @@
 候选目录按优先级从低到高：可执行文件旁的 `elements/` → 工作目录的 `elements/` → `~/.wos/elements/` → `-elements dir1,dir2`（命令行追加，最高）。目录**不递归**，只读 `*.json`；同名定义按上面顺序被后者覆盖，并在重载报告里给出一条 `skipped`（“overridden by …”）。与内置元件重名直接报错（不允许静默顶替）。
 
 - `wos -check-elements`：只加载校验、打印每个文件的加载/跳过/错误，任何错误以退出码 1 结束（配 CI 或随手检查）。
-- 服务端每 2 秒比对定义目录的 mtime，变化即重新加载并把逐文件结果写进日志（`-no-elements-watch` 关闭）。
+- 服务端每 2 秒比对定义集合的指纹（每个 `.json` 的文件名、大小、修改时间，见 `optics/customelem.go` 的 `DefinitionDirsSignature`）：新增、改名、原地改写、删除都会触发重新加载，并把逐文件结果写进日志（`-no-elements-watch` 关闭）。只统计 `.json`，所以临时文件不会造成无谓重载。
 - 场景引用了未加载的脚本元件时，报错信息会指明“要放 elements/ 下的定义文件”（`componentBehavior` 的 unknown 分支）。
 
 ### 预览与 GUI
