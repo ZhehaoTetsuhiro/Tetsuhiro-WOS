@@ -211,6 +211,8 @@
 - sensor：记录输出平面（克隆场 + 指标）。参数 strehl_aperture/strehl_distance 启用 Strehl。
 - beamsplitter：先克隆反射臂场（i√R·e^{iφ}），再缩放透射主场（√(1−R)）；反射臂作为子光路**深度优先**执行（trainer.runTrain 递归，≤8 层），臂末场登记于 t.arms[armID]。
 - combiner：终结元件；按权重 Σ w_ji·arm_i 相干叠加（"main" 指当前光路自身场），各臂 DX 必须一致。
+- **共面元件（同一平面、同一朝向）**：合并为**一个平面**只通过一次。默认**串联**——各元件的透过率相乘（物理上两片薄元件叠在同一平面）；元件参数 `parallel: true` 者改取**并集**（并排图案，如两条缝，各元件只在自己轮廓内作用后相加）。**同一 z 的两个元件不再被判成环路**：旧行为会丢弃整条光路（`planes: []` + 仅一条 `scene_cycle_dropped` 告警），现在正常通过，并补一条 `scene_geometry` 提示列出该平面上的元件。组内非头元件会先平移到自身位置再作用，再平移回来。
+- sensor：记录输出平面（克隆场 + 指标）。参数 strehl_aperture/strehl_distance 启用 Strehl。参数 **`passthrough: true`（或 `monitor: true`）使其成为无损监视器**：记录该面后让光继续，于是一次运行可读多个端口（旧行为是探测器终结光路、一条路径只记第一个面）；不带该参数时仍吸收光并终结光路。
 
 限制常量（simulator.go）：MinGridSize=2、MaxGridSize=65536×4（=262144）、MaxElements=256、MaxPlanes=64、MaxArmDepth=8。
 
@@ -252,7 +254,9 @@
 - 单模门：构建 (cutoff+1)² 的局部幺正矩阵，按「旁观模式」分块散射到态矢量；双模门同理（(cutoff+1)² 的局部矩阵）。
 - 分束器矩阵按总光子数分块、逐块对易哈密顿 exp(iθ(a0†a1+a0a1†)) 求矩阵指数（见 quantum_matrix.go 的 beamSplitterMatrix），精确且与经典对称分束器约定一致。
 - 位移/压缩门对反厄米生成元 expm（缩放平方法 + 泰勒级数）。
-- 混合态（热态/损耗）由密度矩阵后端处理：门做酉共轭 ρ→UρU†（分块局部酉），损耗信道做 Kraus 分解 Σ E_l ρ E_l†。SimulateQuantum 自动选择后端（状态含 thermal 或门含 loss 时走密度矩阵）。
-- 限制：MaxQuantumModes=4、MaxQuantumCutoff=20（SimulateQuantum 校验）。密度矩阵内存为 Dim²，模式多、截断大时成本更高。
+- **全模式联合分布**：`QuantumResult.JointFull` 给出 `(cutoff+1)^modes` 长度的完整 P(n0,n1,…)（little-endian 下标），3+ 模符合/玻色采样可读；`joint_distributions` 仍只给两两边缘。
+- **后选择**：`QuantumConfig.Postselect{Modes,Counts}` 投影到「指定模式光子数等于给定值」的子空间并归一化（纯态/密度矩阵后端都支持），结果含 `postselect_probability`。这是 KLM 这类 heralded 门的接口。
+- **限制**：模式数 ≤16、截断 ≤64，且受状态空间 `(cutoff+1)^modes ≤ 2^20` 约束（密度矩阵后端为 `≤ 2^10`）。因此 5–8 模、截断 1–2 的电路（单光子/KLM）可用，而 4 模截断 20 仍照旧。
+- 混合态（热态/损耗）由密度矩阵后端处理：门做酉共轭 ρ→UρU†（分块局部酉），损耗信道做 Kraus 分解 Σ E_l ρ E_l†。SimulateQuantum 自动选择后端（状态含 thermal 或门含 loss 时走密度矩阵）。密度矩阵内存为 Dim²，因此其后端另有 `≤ 2^10` 的状态空间上限。
 
 物理测试（quantum_test.go）：HOM 聚束、相干态泊松统计、Fock g²、压缩真空正交分量（Heisenberg 极限 1/16）、双模压缩光子数关联、热态统计、损耗信道（迹守恒/二项分布）、单光子马赫-曾德尔。全部解析对比。

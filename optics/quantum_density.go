@@ -489,5 +489,67 @@ func MeasureDensity(d *DensityMatrix) QuantumResult {
 			res.Joint[fmt.Sprintf("%d,%d", m0, m1)] = flat
 		}
 	}
+	res.JointFull = make([]float64, dim)
+	for idx := 0; idx < dim; idx++ {
+		res.JointFull[idx] = real(d.Rho[idx*dim+idx])
+	}
 	return res
+}
+
+// Postselect projects the density operator onto the subspace where mode
+// modes[k] holds exactly counts[k] photons, renormalizes it, and returns the
+// probability mass the projection kept.
+func (d *DensityMatrix) Postselect(modes, counts []int) (float64, error) {
+	if len(modes) != len(counts) {
+		return 0, fmt.Errorf("post-selection needs one count per mode")
+	}
+	if len(modes) == 0 {
+		n := d.Norm()
+		return n, nil
+	}
+	base := d.base()
+	dim := d.dim()
+	strides := make([]int, len(modes))
+	for k, m := range modes {
+		if err := d.checkMode(m); err != nil {
+			return 0, err
+		}
+		if counts[k] < 0 || counts[k] > d.Cutoff {
+			return 0, fmt.Errorf("post-selection count %d out of range [0,%d]", counts[k], d.Cutoff)
+		}
+		strides[k] = qpow(base, m)
+	}
+	keep := make([]bool, dim)
+	for idx := 0; idx < dim; idx++ {
+		ok := true
+		for k := range modes {
+			if (idx/strides[k])%base != counts[k] {
+				ok = false
+				break
+			}
+		}
+		keep[idx] = ok
+	}
+	out := make([]complex128, dim*dim)
+	var kept float64
+	for i := 0; i < dim; i++ {
+		if !keep[i] {
+			continue
+		}
+		kept += real(d.Rho[i*dim+i])
+		row := i * dim
+		for j := 0; j < dim; j++ {
+			if keep[j] {
+				out[row+j] = d.Rho[row+j]
+			}
+		}
+	}
+	d.Rho = out
+	if kept > 0 {
+		scale := complex(1/kept, 0)
+		for i := range d.Rho {
+			d.Rho[i] *= scale
+		}
+	}
+	return kept, nil
 }

@@ -241,6 +241,16 @@ var ElementDocs = []ElementDoc{
 		fp("n_y", "n_y", "", 1, 4, 0.01, 1.5, ""),
 		fp("n_z", "n_z", "", 1, 4, 0.01, 1.4, ""),
 	}},
+	{Type: "kerr", Label: "克尔介质（强度相关折射率）", Help: "薄克尔片：相位 phi = k·n2·I·L 随局部强度 |E|² 变化（n = n0 + n2·I）；可选双光子吸收。非线性/腔迭代/双稳类实验的元件。", Params: []ParamSpec{
+		fp("n2", "非线性折射率 n2", "m²/W", -1e-2, 1e-2, 1e-6, 1e-6, "相位 = k·n2·I·L，I 单位 W/m²；真实介质 n2≈1e-14~1e-20，需极高强度才显著，可用有效值"),
+		fp("length", "有效厚度 L", "m", 0, 1, 1e-4, 1e-3, ""),
+		fp("tpa", "双光子吸收 beta", "m/W", 0, 1e-2, 1e-6, 0, ">0 时高强度区被额外吸收"),
+	}},
+	{Type: "saturable_absorber", Label: "可饱和吸收体", Help: "吸收 alpha(I)=alpha0/(1+I/I_sat) 随强度下降：弱光被吸收、强光透过（阈值/双稳的幅值原语）。", Params: []ParamSpec{
+		fp("alpha0", "小信号吸收 alpha0", "1/m", 0, 1e6, 1, 1000, "弱光吸收系数"),
+		fp("isat", "饱和强度 I_sat", "W/m²", 1, 1e12, 1e3, 1e6, "强度达到此处吸收减半"),
+		fp("length", "有效厚度 L", "m", 0, 1, 1e-4, 1e-3, ""),
+	}},
 	{Type: "lens", Label: "薄透镜", Help: "相位 exp(-i k r^2/(2f))；f>0 会聚，f<0 发散，可带圆形孔径。",
 		Params: []ParamSpec{
 			fp("f", "焦距", "m", -100, 100, 1e-3, 0.1, "f>0 会聚"),
@@ -278,6 +288,7 @@ var ElementDocs = []ElementDoc{
 			fp("rotation", "旋转角", "rad", -3.1416, 3.1416, 0.01, 0, "绕中心旋转整个孔径"),
 			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
+			bp("parallel", "与同平面元件并联合成", false, "同一 z 上的多个元件默认串联（透过率相乘）；置 true 则取并集（并排图案，如两条缝）"),
 			fp("edge_sigma", "边缘平滑", "m", 0, 1e-3, 1e-6, 0, "0=理想硬边；>0 用误差函数软化边缘以抑制混叠"),
 		}},
 	{Type: "apodizer", Label: "高斯切趾器", Help: "振幅透过率 exp(-r^2/waist^2)，用于软化硬边。",
@@ -384,9 +395,10 @@ var ElementDocs = []ElementDoc{
 		Params: []ParamSpec{
 			ParamSpec{Key: "outputs", Label: "输出端口", Kind: "nested", Default: []any{}, Help: "每端口：label + weights[{arm,re,im}]；arm 为 main 或 bs0/bs0.bs0 等臂标识"},
 		}},
-	{Type: "sensor", Label: "探测器（记录面）", Help: "记录该处光场：强度/相位/剖面与全部指标。",
+	{Type: "sensor", Label: "探测器（记录面）", Help: "记录该处光场：强度/相位/剖面与全部指标。passthrough=true 时成为无损监视器，记录后让光继续（一次运行读多个端口）。",
 		Params: []ParamSpec{
 			tp("label", "名称", "sensor", ""),
+			bp("passthrough", "监视（透射测量）", false, "true=记录后让光继续（无损监视，一次运行读多个端口）；false=吸收并终止光路"),
 			fp("strehl_aperture", "斯特列尔孔径", "m", 0, 0.05, 1e-4, 0, "计算 Strehl 用的参考光瞳半径，0=不计算"),
 			fp("strehl_distance", "斯特列尔距离", "m", 0, 100, 1e-3, 0, "参考聚焦距离，0=不计算"),
 		}},

@@ -46,14 +46,26 @@
       "mean_photons": [0.5, 0.5], "g2": [0, 0],
       "photon_distributions": [[0.5, 0.5, ...], [...]],
       "quadratures": [{"mode":0,"mean_x":0,"var_x":0.25,"mean_p":0,"var_p":0.25}, ...],
-      "joint_distributions": {"0,1": [ ... ]}   // 拍平 (cutoff+1)^2，下标 a*(cutoff+1)+b
+      "joint_distributions": {"0,1": [ ... ]},    // 拍平 (cutoff+1)^2，下标 a*(cutoff+1)+b
+      "joint_full": [ ... ]                        // 全 modes 维联合分布，(cutoff+1)^modes 长
+    }
+
+`joint_full` 的下标与态矢量一致（little-endian，`idx = n0 + base·n1 + base²·n2 + …`），3+ 模符合与玻色采样只能从这里读（`joint_distributions` 只给两两边缘）。
+
+可选**后选择**：请求体加 `"postselect": {"modes":[1],"counts":[0]}`，只保留「模式 1 光子数 = 0」的分支、归一化后返回，并多一个字段 `postselect_probability`（该分支的概率）：
+
+    {
+      "modes": 2, "cutoff": 4,
+      "state": {"type": "fock", "params": {"occupation": [1,1]}},
+      "gates": [{"type": "beam_splitter", "params": {"mode0":0, "mode1":1, "reflectivity":0.5}}],
+      "postselect": {"modes": [1], "counts": [0]}   // p=0.5，剩余态 <n0>=2
     }
 
 state.type：vacuum / fock / coherent / squeezed_vacuum / two_mode_squeezed / thermal；gate.type：phase_shift / beam_splitter / displacement / squeeze / loss（参数见 /api/catalog 的 quantum 段）。热态（thermal）与损耗门（loss）产生混合态，自动走密度矩阵后端。
 
 `POST /api/quantum?fmt=png` 返回同一结果的 PNG 图表（每模光子数分布柱状图 + 第一对模式联合分布热图）；`fmt=svg` 返回等价的矢量 SVG 图表。
 
-限制：模式数 ≤4、截断 ≤20（越界返回 400）。
+限制：模式数 ≤16、截断 ≤64，且 `(cutoff+1)^modes ≤ 2^20`（混合态密度矩阵后端 ≤ 2^10）；越界返回 400。
 
 ## GET /api/runs/{id}
 

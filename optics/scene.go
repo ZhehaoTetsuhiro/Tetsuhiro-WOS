@@ -3,6 +3,7 @@ package optics
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -177,19 +178,37 @@ const (
 
 // sceneBeam is a beam launched either by a source or by a component.
 type sceneBeam struct {
-	id       int
-	src      int         // source index that ultimately feeds this beam
-	comp     int         // launching component (-1 = source launch)
-	coef     complex128  // amplitude/phase transfer applied when the beam was launched
-	dir      Vec3        // propagation direction (unit)
-	from     Vec3        // launch point
-	pathLen  float64     // accumulated optical path length at the launch point (m)
-	blocked  bool        // the component stopped the light: no amplitude left
-	producer *sceneVisit // visit that launched this beam (nil for a source)
-	visit    *sceneVisit
-	segLen   float64 // geometric length of the segment to visit
-	escaped  bool    // no further component in front of it
-	end      Vec3    // end point of the drawn/escaped segment
+	id      int
+	src     int        // source index that ultimately feeds this beam
+	comp    int        // launching component/plane-group head (-1 = source launch)
+	coef    complex128 // amplitude/phase transfer applied when the beam was launched
+	dir     Vec3       // propagation direction (unit)
+	from    Vec3       // launch point
+	pathLen float64    // accumulated optical path length at the launch point (m)
+	blocked bool       // the component stopped the light: no amplitude left
+	// skipPlane lists the components sharing the plane this beam was launched
+	// from. A beam leaves a plane along +n; the other thin elements printed on
+	// that same plane are *behind* it, so the ray must not re-enter them at
+	// zero distance (that used to look like a cavity and dropped the whole
+	// path as scene_cycle_dropped). Elements at a genuinely different plane
+	// (even 1 um away) are still reachable.
+	skipPlane []int
+	producer  *sceneVisit // visit that launched this beam (nil for a source)
+	visit     *sceneVisit
+	segLen    float64 // geometric length of the segment to visit
+	escaped   bool    // no further component in front of it
+	end       Vec3    // end point of the drawn/escaped segment
+}
+
+// skipsAtPlane reports whether a zero-distance hit on component i must be
+// ignored because i sits on the plane this beam was launched from.
+func (b *sceneBeam) skipsAtPlane(i int) bool {
+	for _, c := range b.skipPlane {
+		if c == i {
+			return true
+		}
+	}
+	return false
 }
 
 // sceneIncoming is one contribution arriving at a visit.
@@ -200,9 +219,16 @@ type sceneIncoming struct {
 
 // sceneVisit is one component interaction (a component hit by a beam
 // travelling in a given direction).
+//
+// Coplanar thin elements (apertures printed on the same plane, say) share one
+// visit: comp is the group head (the lowest component index of the plane) and
+// members lists every component on that plane, in index order. They are
+// evaluated together — see sceneSim.applyComponent for the series/parallel
+// composition.
 type sceneVisit struct {
 	id       int
-	comp     int
+	comp     int     // plane-group head (== members[0])
+	members  []int   // every component on this plane, index order
 	src      int     // source that first reached this interaction (-1 = unknown)
 	inDir    Vec3    // direction of the first arrival: the visit's key and tilt reference
 	arrival  float64 // earliest arrival path length (sorts the evaluation)
@@ -223,6 +249,13 @@ type sceneGraph struct {
 	beams    []*sceneBeam
 	visits   []*sceneVisit
 	warnings []string
+	// head maps a component index onto the head of its coincident-plane
+	// group (a component with no coplanar partner is its own head); members
+	// lists every component on that plane. planeGroups holds the groups with
+	// more than one member, for the "coplanar elements stack" diagnostic.
+	head        []int
+	members     [][]int
+	planeGroups [][]int
 	// visitAt indexes visits by "comp|dirBucket".
 	visitAt map[string]*sceneVisit
 	// planar reports whether every beam travels in the x-z table plane.
@@ -291,6 +324,7 @@ func BuildSceneGraph(scene *SceneSpec, sources []SourceSpec) (*sceneGraph, error
 		g.shapes = append(g.shapes, sh)
 		g.behavior = append(g.behavior, kind)
 	}
+	g.buildPlaneGroups()
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("scene has no light sources")
 	}
@@ -313,6 +347,110 @@ func BuildSceneGraph(scene *SceneSpec, sources []SourceSpec) (*sceneGraph, error
 	g.sources = sources
 	g.checkPlanar()
 	return g, nil
+}
+
+// buildPlaneGroups groups the thin (transmissive) components that share one
+// plane. Two elements printed on the same plane are physically stacked, so a
+// beam meeting that plane must pass through all of them at once; splitting the
+// interaction per component used to send the ray back and forth across the
+// zero-length gap, which the router then reported as a recirculating cavity
+// (scene_cycle_dropped) and dropped the whole path. A group is keyed by the
+// plane (same normal, same offset within sceneEpsilon) and only ever contains
+// transmissive elements: mirrors, splitters and detectors keep their own visit
+// because passing light through them is not a plain multiplication.
+func (g *sceneGraph) buildPlaneGroups() {
+	n := len(g.comps)
+	g.head = make([]int, n)
+	g.members = make([][]int, n)
+	for i := 0; i < n; i++ {
+		g.head[i] = i
+		g.members[i] = []int{i}
+	}
+	var groupGeom []compGeom
+	for i := 0; i < n; i++ {
+		if g.behavior[i] != behaviorTransmit {
+			continue
+		}
+		gi := -1
+		for k := range groupGeom {
+			if sameScenePlane(groupGeom[k], g.geoms[i]) {
+				gi = k
+				break
+			}
+		}
+		if gi < 0 {
+			groupGeom = append(groupGeom, g.geoms[i])
+			g.planeGroups = append(g.planeGroups, []int{i})
+			continue
+		}
+		g.planeGroups[gi] = append(g.planeGroups[gi], i)
+	}
+	for _, grp := range g.planeGroups {
+		for _, i := range grp {
+			g.head[i] = grp[0]
+			g.members[i] = grp
+		}
+	}
+	// Keep only the groups that actually stack something on one plane, and
+	// tell the run about them: the composition (series by default) is easy to
+	// be surprised by, and silence was the original complaint.
+	kept := g.planeGroups[:0]
+	for _, grp := range g.planeGroups {
+		if len(grp) > 1 {
+			kept = append(kept, grp)
+			names := make([]string, len(grp))
+			for k, i := range grp {
+				names[k] = g.compName(i)
+			}
+			g.warn(fmt.Sprintf("共面元件在 z≈%g 合成一个平面：%s（默认串联相乘；标记 parallel=true 者取并集）",
+				g.geoms[grp[0]].pos.Z, strings.Join(names, " + ")))
+		}
+	}
+	g.planeGroups = kept
+}
+
+// sameScenePlane reports whether two component geometries describe the same
+// optical plane: identical orientation (same facing normal) and coincident
+// offsets. sceneEpsilon (1 nm) is far below any usable z spacing, so a 1 um
+// offset — the documented workaround — keeps the elements on separate planes.
+func sameScenePlane(a, b compGeom) bool {
+	if a.n.Dot(b.n) < 1-1e-9 {
+		return false
+	}
+	return math.Abs(b.pos.Sub(a.pos).Dot(a.n)) < sceneEpsilon
+}
+
+// pbool reads a boolean parameter from the loosely typed JSON params. Numbers
+// are accepted (0 = false) so a GUI that stores a checkbox as a float works.
+func pbool(p map[string]any, key string, def bool) bool {
+	v, ok := p[key]
+	if !ok {
+		return def
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off", "":
+			return false
+		}
+		return def
+	default:
+		if f, err := asFloat(v); err == nil {
+			return f != 0
+		}
+	}
+	return def
+}
+
+// sensorPasses reports whether a detector is a (lossless) monitor: it records
+// the field and lets it continue, so one run can read every port it sits on
+// instead of only the first detector ending the path.
+func sensorPasses(p map[string]any) bool {
+	return pbool(p, "passthrough", false) || pbool(p, "monitor", false)
 }
 
 // placeSceneSources fills in a default position/direction for scene sources
@@ -341,11 +479,12 @@ func placeSceneSources(scene *SceneSpec, sources []SourceSpec) []SourceSpec {
 	return out
 }
 
-// visitCount counts how many visits already exist for a component.
+// visitCount counts how many visits already exist for a component's plane.
 func (g *sceneGraph) visitCount(comp int) int {
+	h := g.head[comp]
 	n := 0
 	for _, v := range g.visits {
-		if v.comp == comp {
+		if v.comp == h {
 			n++
 		}
 	}
@@ -358,7 +497,7 @@ func (g *sceneGraph) traceBeam(b *sceneBeam) error {
 		g.warn(fmt.Sprintf("light path exceeds %d beams; further splitting was truncated", MaxSceneBeams))
 		return nil
 	}
-	comp, t, hit, ok := g.nextHit(b.from, b.dir, b.comp)
+	comp, t, hit, ok := g.nextHit(b)
 	if !ok {
 		b.escaped = true
 		b.end = b.from.Add(b.dir.Scale(g.escapeDistance(b.from, b.dir)))
@@ -414,11 +553,14 @@ func (g *sceneGraph) compName(i int) string {
 	return fmt.Sprintf("%s#%d", c.Type, i)
 }
 
-// addVisit finds or creates the visit of (component, incoming direction).
+// addVisit finds or creates the visit of (plane, incoming direction). Every
+// component of a coplanar group maps onto the group's single visit.
 func (g *sceneGraph) addVisit(comp int, inDir Vec3, b *sceneBeam, segLen float64, hit Vec3) *sceneVisit {
-	v := g.matchVisit(comp, inDir)
+	h := g.head[comp]
+	v := g.matchVisit(h, inDir)
 	if v == nil {
-		v = &sceneVisit{id: len(g.visits), comp: comp, inDir: inDir, arrival: math.Inf(1), arriveAt: hit, src: -1}
+		v = &sceneVisit{id: len(g.visits), comp: h, members: g.members[h], inDir: inDir,
+			arrival: math.Inf(1), arriveAt: hit, src: -1}
 		g.visits = append(g.visits, v)
 	}
 	if v.src < 0 {
@@ -439,6 +581,12 @@ func (g *sceneGraph) launch(v *sceneVisit) error {
 	geom := g.geoms[v.comp]
 	switch g.behavior[v.comp] {
 	case behaviorSensor:
+		// A monitor detector records the field and lets it continue, so one
+		// run can read every port along the path (a plain detector absorbs
+		// the light and ends the beam here).
+		if sensorPasses(gc.Params) {
+			return g.newBeam(v, v.inDir, 1)
+		}
 		return nil
 	case behaviorSplit:
 		r := pfd(gc.Params, "reflectivity", 0.5)
@@ -494,18 +642,21 @@ func (g *sceneGraph) newBeam(v *sceneVisit, dir Vec3, coef complex128) error {
 	b := &sceneBeam{
 		id: len(g.beams), src: v.src, comp: v.comp, coef: coef,
 		dir: dir.Unit(), from: v.arriveAt, pathLen: v.arrival, producer: v,
+		skipPlane: v.members,
 	}
 	g.beams = append(g.beams, b)
 	v.out = append(v.out, b)
 	return g.traceBeam(b)
 }
 
-// nextHit returns the nearest component in front of the ray. skipComp is the
-// component the beam was just launched from: its own plane would be hit at
-// t = 0, so it is ignored at zero distance (a beam may still return to it
-// later). A component whose clear aperture the ray misses is skipped, except
-// for stops, which block the beam instead.
-func (g *sceneGraph) nextHit(from, dir Vec3, skipComp int) (int, float64, Vec3, bool) {
+// nextHit returns the nearest component in front of the beam. Components
+// sharing the plane the beam was just launched from are skipped at zero
+// distance (they are stacked behind this beam, and revisiting them looked like
+// a cavity); the beam may still return to them later along a different path. A
+// component whose clear aperture the ray misses is skipped, except for stops,
+// which block the beam instead.
+func (g *sceneGraph) nextHit(b *sceneBeam) (int, float64, Vec3, bool) {
+	from, dir := b.from, b.dir
 	best := -1
 	bestT := math.Inf(1)
 	for i := range g.comps {
@@ -518,7 +669,7 @@ func (g *sceneGraph) nextHit(from, dir Vec3, skipComp int) (int, float64, Vec3, 
 		if t < 0 || t >= bestT {
 			continue
 		}
-		if t <= sceneEpsilon && i == skipComp {
+		if t <= sceneEpsilon && b.skipsAtPlane(i) {
 			continue
 		}
 		hit := from.Add(dir.Scale(t))

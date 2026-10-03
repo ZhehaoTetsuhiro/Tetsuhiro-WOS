@@ -3,7 +3,6 @@ package optics
 import (
 	"fmt"
 	"math"
-	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,6 +173,8 @@ func init() {
 	RegisterElement("uniaxial", newUniaxial)
 	RegisterElement("medium", newMedium)
 	RegisterElement("biaxial", newBiaxial)
+	RegisterElement("kerr", newKerr)
+	RegisterElement("saturable_absorber", newSaturableAbsorber)
 }
 
 // ---- lenses ----------------------------------------------------------------
@@ -631,6 +632,12 @@ func (e *zonePlateEl) Apply(f *Field, ctx *Context) error {
 type diffuserEl struct {
 	sigma, corr, amp float64
 	seed             int64
+	// x0, y0 anchor the random screen to the lab coordinates of the element
+	// (set from the scene component position). The screen is a physical
+	// object: translating the element slides it under the beam, so the
+	// speckle changes. A screen keyed to the array index instead did not move
+	// with the element at all (evidence §9.4).
+	x0, y0 float64
 }
 
 func newDiffuser(p map[string]any) (Element, error) {
@@ -639,15 +646,40 @@ func newDiffuser(p map[string]any) (Element, error) {
 		corr:  pfd(p, "correlation", 2e-5),
 		amp:   pfd(p, "amplitude", 1),
 		seed:  int64(pfd(p, "seed", 1)),
+		x0:    pfd(p, "x", 0),
+		y0:    pfd(p, "y", 0),
 	}, nil
+}
+
+// hashNoise01 maps an integer lattice cell (and the per-element seed) onto a
+// deterministic uniform value in [0,1). It replaces a sequential RNG so the
+// white noise is a pure function of the *lab* cell, which is what makes the
+// screen translate with its element.
+func hashNoise01(x, y, seed int64) float64 {
+	h := uint64(seed)*0x9E3779B97F4A7C15 ^
+		uint64(x)*0xC2B2AE3D27D4EB4F ^
+		uint64(y)*0x165667B19E3779F9
+	h ^= h >> 30
+	h *= 0xBF58476D1CE4E5B9
+	h ^= h >> 27
+	h *= 0x94D049BB133111EB
+	h ^= h >> 31
+	return float64(h>>11) / float64(uint64(1)<<53)
 }
 
 func (e *diffuserEl) Apply(f *Field, ctx *Context) error {
 	n := f.N
 	phase := make([]float64, n*n)
-	rng := rand.New(rand.NewSource(e.seed))
-	for i := range phase {
-		phase[i] = rng.Float64()*2*math.Pi - math.Pi
+	dx := f.DX
+	if dx <= 0 {
+		dx = 1
+	}
+	for j := 0; j < n; j++ {
+		gy := int64(math.Round((f.Y(j) + e.y0) / dx))
+		for i := 0; i < n; i++ {
+			gx := int64(math.Round((f.X(i) + e.x0) / dx))
+			phase[j*n+i] = hashNoise01(gx, gy, e.seed)*2*math.Pi - math.Pi
+		}
 	}
 	if e.corr > 0 {
 		// Smooth the white noise in the frequency domain: multiply by
@@ -1068,4 +1100,91 @@ func (e *biaxialEl) Apply(f *Field, ctx *Context) error {
 		{0, 0, complex(e.nz*e.nz, 0)},
 	}
 	return PropagateAnisotropic(f, e.distance, eps, ctx)
+}
+
+// ---- intensity-dependent (nonlinear) elements ------------------------------
+//
+// Every element above is linear: its transmittance does not depend on how
+// bright the light is. These two do — the field's local intensity |E|² sets the
+// extra phase (Kerr) or the absorption (saturable absorber). They are the
+// primitive the iterative-cavity / optical-Ising / threshold-logic and truly
+// nonlinear D2NN work needs (the `medium` element is intensity-independent).
+
+// kerrEl is a thin Kerr slice: phi(x,y) = k * n2 * I(x,y) * L, i.e. the
+// refractive index is n0 + n2 * I. An optional two-photon absorption
+// coefficient beta adds an intensity-proportional loss.
+type kerrEl struct {
+	n2, tpa, length float64
+}
+
+func newKerr(p map[string]any) (Element, error) {
+	l := pfd(p, "length", 1e-3)
+	if l < 0 {
+		return nil, fmt.Errorf("kerr: length must be >= 0")
+	}
+	return &kerrEl{
+		n2:     pfd(p, "n2", 1e-14),
+		tpa:    pfd(p, "tpa", 0),
+		length: l,
+	}, nil
+}
+
+// Apply multiplies the field by exp(i k n2 I L - beta I L / 2) with I = |E|².
+func (e *kerrEl) Apply(f *Field, ctx *Context) error {
+	k := 2 * math.Pi / ctx.Wavelength
+	for i := range f.Ex {
+		I := f.Intensity(i)
+		if I == 0 {
+			continue
+		}
+		t := cexpI(k * e.n2 * I * e.length)
+		if e.tpa != 0 {
+			t *= complex(math.Exp(-0.5*e.tpa*I*e.length), 0)
+		}
+		f.Ex[i] *= t
+		if f.Polarized {
+			f.Ey[i] *= t
+		}
+		if f.Vectorial && f.Ez != nil {
+			f.Ez[i] *= t
+		}
+	}
+	return nil
+}
+
+// saturableAbsorberEl is a thin saturable absorber: the absorption
+// alpha(I) = alpha0 / (1 + I/I_sat) falls as the light gets brighter, so a dim
+// region is absorbed and a bright one transmits. It is the amplitude-side
+// complement of the Kerr phase (a simple threshold/bistability primitive).
+type saturableAbsorberEl struct {
+	alpha0, isat, length float64
+}
+
+func newSaturableAbsorber(p map[string]any) (Element, error) {
+	a := pfd(p, "alpha0", 1.0) // 1/m
+	l := pfd(p, "length", 1e-3)
+	if a < 0 || l < 0 {
+		return nil, fmt.Errorf("saturable_absorber: alpha0 and length must be >= 0")
+	}
+	isat := pfd(p, "isat", 1e6) // W/m^2
+	if isat <= 0 {
+		return nil, fmt.Errorf("saturable_absorber: saturation intensity isat must be > 0")
+	}
+	return &saturableAbsorberEl{alpha0: a, isat: isat, length: l}, nil
+}
+
+// Apply scales the field by exp(-alpha0 L / (2 (1 + I/I_sat))).
+func (e *saturableAbsorberEl) Apply(f *Field, ctx *Context) error {
+	for i := range f.Ex {
+		I := f.Intensity(i)
+		t := complex(math.Exp(-e.alpha0*e.length/(2*(1+I/e.isat))), 0)
+		f.Ex[i] *= t
+		if f.Polarized {
+			f.Ey[i] *= t
+		}
+		if f.Vectorial && f.Ez != nil {
+			f.Ez[i] *= t
+		}
+	}
+	return nil
 }

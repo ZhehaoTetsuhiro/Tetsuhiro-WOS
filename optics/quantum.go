@@ -386,11 +386,34 @@ func (q *QState) Fidelity(other *QState) float64 {
 
 // ---- configuration / result types for the quantum simulator ----------------
 
-// Limits for the quantum backend.
+// Limits for the quantum backend. The binding constraint is the Hilbert-space
+// dimension (cutoff+1)^modes, not the mode count on its own: a many-mode
+// single-photon circuit (cutoff 1) is tiny, while 4 modes at cutoff 20 is
+// already ~200k amplitudes. Bounding the dimension lets 5-8 mode / cutoff 1-2
+// circuits (KLM, boson sampling) through while 4 modes at cutoff 20 still works.
 const (
-	MaxQuantumModes  = 4
-	MaxQuantumCutoff = 20
+	MaxQuantumModes  = 16
+	MaxQuantumCutoff = 64
+	// MaxQuantumDim bounds the number of state-vector amplitudes.
+	MaxQuantumDim = 1 << 20
+	// MaxDensityDim bounds (cutoff+1)^modes for the density-matrix backend,
+	// whose storage is the square of that.
+	MaxDensityDim = 1 << 10
 )
+
+// quantumDim returns (cutoff+1)^modes without overflowing: anything above
+// MaxQuantumDim comes back as MaxQuantumDim+1, which the validator rejects.
+func quantumDim(modes, cutoff int) int {
+	base := cutoff + 1
+	dim := 1
+	for i := 0; i < modes; i++ {
+		if dim > MaxQuantumDim/base {
+			return MaxQuantumDim + 1
+		}
+		dim *= base
+	}
+	return dim
+}
 
 // QuantumStateSpec describes the initial quantum state.
 type QuantumStateSpec struct {
@@ -404,12 +427,23 @@ type QuantumGateSpec struct {
 	Params map[string]any `json:"params"`
 }
 
+// PostselectSpec conditions the output on a photon-number pattern in a subset
+// of the modes: only the terms where mode modes[k] carries exactly counts[k]
+// photons survive, the state is renormalized, and the probability of the
+// pattern is reported as postselect_probability. This is the interface
+// heralded (KLM-style) gates and rejected boson-sampling runs need.
+type PostselectSpec struct {
+	Modes  []int `json:"modes"`
+	Counts []int `json:"counts"`
+}
+
 // QuantumConfig is the full JSON configuration of a quantum run.
 type QuantumConfig struct {
-	Modes  int               `json:"modes"`
-	Cutoff int               `json:"cutoff"`
-	State  QuantumStateSpec  `json:"state"`
-	Gates  []QuantumGateSpec `json:"gates"`
+	Modes      int               `json:"modes"`
+	Cutoff     int               `json:"cutoff"`
+	State      QuantumStateSpec  `json:"state"`
+	Gates      []QuantumGateSpec `json:"gates"`
+	Postselect *PostselectSpec   `json:"postselect,omitempty"`
 }
 
 // QuadratureStat reports the mean and variance of two orthogonal quadratures.
@@ -430,7 +464,16 @@ type QuantumResult struct {
 	G2     []float64            `json:"g2"`
 	Dist   [][]float64          `json:"photon_distributions"`
 	Joint  map[string][]float64 `json:"joint_distributions"`
-	Quad   []QuadratureStat     `json:"quadratures"`
+	// JointFull is the full M-mode joint photon-number distribution
+	// P(n0, n1, …), indexed little-endian like the state vector:
+	// idx = n0 + (cutoff+1)*n1 + (cutoff+1)^2*n2 + …, length (cutoff+1)^Modes.
+	// The pairwise joint_distributions cannot express 3+ mode coincidences;
+	// this can (boson sampling, post-selection).
+	JointFull []float64 `json:"joint_full"`
+	// PostselectProb is the probability of the post-selection pattern, i.e.
+	// the weight of the projected subspace. 0 when none was requested.
+	PostselectProb float64          `json:"postselect_probability,omitempty"`
+	Quad           []QuadratureStat `json:"quadratures"`
 }
 
 // parseOccupation accepts a Fock occupation list as a JSON array, a string of
@@ -610,7 +653,60 @@ func MeasureQuantum(q *QState) QuantumResult {
 			res.Joint[fmt.Sprintf("%d,%d", m0, m1)] = flat
 		}
 	}
+	res.JointFull = make([]float64, len(q.Amps))
+	for idx, v := range q.Amps {
+		res.JointFull[idx] = real(v)*real(v) + imag(v)*imag(v)
+	}
 	return res
+}
+
+// Postselect projects the state onto the subspace where mode modes[k] holds
+// exactly counts[k] photons, renormalizes it, and returns the probability mass
+// the projection kept. A zero probability leaves the (zeroed) state untouched;
+// the caller decides how to report it.
+func (q *QState) Postselect(modes, counts []int) (float64, error) {
+	if len(modes) != len(counts) {
+		return 0, fmt.Errorf("post-selection needs one count per mode")
+	}
+	if len(modes) == 0 {
+		n := q.Norm()
+		return n * n, nil
+	}
+	base := q.base()
+	strides := make([]int, len(modes))
+	for k, m := range modes {
+		if err := q.checkMode(m); err != nil {
+			return 0, err
+		}
+		if counts[k] < 0 || counts[k] > q.Cutoff {
+			return 0, fmt.Errorf("post-selection count %d out of range [0,%d]", counts[k], q.Cutoff)
+		}
+		strides[k] = qpow(base, m)
+	}
+	var kept float64
+	for idx := range q.Amps {
+		ok := true
+		for k := range modes {
+			if (idx/strides[k])%base != counts[k] {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			q.Amps[idx] = 0
+			continue
+		}
+		v := q.Amps[idx]
+		kept += real(v)*real(v) + imag(v)*imag(v)
+	}
+	if kept == 0 {
+		return 0, nil
+	}
+	scale := complex(1/math.Sqrt(kept), 0)
+	for i := range q.Amps {
+		q.Amps[i] *= scale
+	}
+	return kept, nil
 }
 
 // SimulateQuantum validates and runs a quantum-optical simulation. Runs that
@@ -623,6 +719,11 @@ func SimulateQuantum(cfg QuantumConfig) (*QuantumResult, error) {
 	if cfg.Cutoff < 1 || cfg.Cutoff > MaxQuantumCutoff {
 		return nil, fmt.Errorf("quantum cutoff must be between 1 and %d", MaxQuantumCutoff)
 	}
+	dim := quantumDim(cfg.Modes, cfg.Cutoff)
+	if dim > MaxQuantumDim {
+		return nil, fmt.Errorf("quantum state space is too large: %d modes at cutoff %d make %d combinations (limit %d); lower the cutoff or the mode count",
+			cfg.Modes, cfg.Cutoff, dim, MaxQuantumDim)
+	}
 	mixed := cfg.State.Type == "thermal"
 	for _, g := range cfg.Gates {
 		if g.Type == "loss" {
@@ -631,6 +732,10 @@ func SimulateQuantum(cfg QuantumConfig) (*QuantumResult, error) {
 		}
 	}
 	if mixed {
+		if dim > MaxDensityDim {
+			return nil, fmt.Errorf("the density-matrix backend (thermal state or loss gate) supports at most %d combinations, got %d; lower the cutoff or the mode count",
+				MaxDensityDim, dim)
+		}
 		d, err := buildDensityState(cfg.State, cfg.Modes, cfg.Cutoff)
 		if err != nil {
 			return nil, err
@@ -638,7 +743,12 @@ func SimulateQuantum(cfg QuantumConfig) (*QuantumResult, error) {
 		if err := applyDensityGates(d, cfg.Gates); err != nil {
 			return nil, err
 		}
+		prob, err := postselectDensity(d, cfg.Postselect)
+		if err != nil {
+			return nil, err
+		}
 		res := MeasureDensity(d)
+		res.PostselectProb = prob
 		return &res, nil
 	}
 	q, err := buildQuantumState(cfg.State, cfg.Modes, cfg.Cutoff)
@@ -648,6 +758,27 @@ func SimulateQuantum(cfg QuantumConfig) (*QuantumResult, error) {
 	if err := applyQuantumGates(q, cfg.Gates); err != nil {
 		return nil, err
 	}
+	prob, err := postselectPure(q, cfg.Postselect)
+	if err != nil {
+		return nil, err
+	}
 	res := MeasureQuantum(q)
+	res.PostselectProb = prob
 	return &res, nil
+}
+
+// postselectPure applies an optional post-selection to a pure state.
+func postselectPure(q *QState, ps *PostselectSpec) (float64, error) {
+	if ps == nil || len(ps.Modes) == 0 {
+		return 0, nil
+	}
+	return q.Postselect(ps.Modes, ps.Counts)
+}
+
+// postselectDensity applies an optional post-selection to a density operator.
+func postselectDensity(d *DensityMatrix, ps *PostselectSpec) (float64, error) {
+	if ps == nil || len(ps.Modes) == 0 {
+		return 0, nil
+	}
+	return d.Postselect(ps.Modes, ps.Counts)
 }

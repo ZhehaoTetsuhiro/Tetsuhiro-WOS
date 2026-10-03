@@ -284,12 +284,22 @@ func (s *sceneSim) run() error {
 			delete(s.fields, in.beam.id)
 		}
 		if s.g.behavior[v.comp] == behaviorSensor {
-			if err := s.record(merged, v); err != nil {
+			// A monitor detector records the field and keeps going, so the
+			// beam lights the rest of the path; a plain detector ends here.
+			monitor := sensorPasses(s.g.comps[v.comp].Params)
+			rec := merged
+			if monitor {
+				// The recorded copy carries the active-area mask; the field
+				// the monitor passes on must stay unclipped.
+				rec = merged.Clone()
+			}
+			if err := s.record(rec, v); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := s.applyComponent(v, merged); err != nil {
+			if !monitor {
+				continue
+			}
+		} else if err := s.applyComponent(v, merged); err != nil {
 			return fmt.Errorf("component %d (%s): %v", v.comp, s.g.comps[v.comp].Type, err)
 		}
 		inPow := fieldPower(merged)
@@ -406,18 +416,100 @@ func (v *sceneVisit) deviation(dir Vec3, geom compGeom) float64 {
 	return n
 }
 
-// applyComponent multiplies the merged field by the component's operator: its
-// clear aperture (the shape), then its thin-element transformation.
+// applyComponent multiplies the merged field by the plane's operator: the
+// members' clear apertures and thin-element transformations.
+//
+// Members without "parallel" are stacked: they multiply the field in index
+// order, so the transmittances compose (the physical meaning of two thin
+// elements printed on one plane). Members marked "parallel": true are printed
+// *side by side* instead: each acts on the field reaching the plane and their
+// outputs add, so two disjoint sub-apertures become the union of their openings
+// rather than their (empty) intersection.
 func (s *sceneSim) applyComponent(v *sceneVisit, f *Field) error {
-	comp := &s.g.comps[v.comp]
-	sh := s.g.shapes[v.comp]
-	if sh != nil && !stopLike(comp.Type) {
-		applyShapeMask(f, sh)
+	members := v.members
+	if len(members) == 0 {
+		members = []int{v.comp}
 	}
-	if el := s.g.elements[v.comp]; el != nil {
-		return el.Apply(f, &s.ctx)
+	var par []int
+	head := s.g.geoms[v.comp]
+	for _, i := range members {
+		if pbool(s.g.comps[i].Params, "parallel", false) {
+			par = append(par, i)
+			continue
+		}
+		if err := s.applyOne(i, f, head); err != nil {
+			return err
+		}
+	}
+	if len(par) == 0 {
+		return nil
+	}
+	base := f.Clone()
+	s.zeroField(f)
+	for _, i := range par {
+		g := base.Clone()
+		if err := s.applyOne(i, g, head); err != nil {
+			return err
+		}
+		addFieldInto(f, g)
 	}
 	return nil
+}
+
+// applyOne applies one component's operator to f. The merged field is framed on
+// the plane-group head, so a coplanar member sitting elsewhere on the plane is
+// first translated into its own frame (the element was compiled centred on its
+// component), then translated back.
+func (s *sceneSim) applyOne(i int, f *Field, head compGeom) error {
+	du, dv := 0.0, 0.0
+	if d := s.g.geoms[i].pos.Sub(head.pos); !d.IsZero() {
+		du, dv = d.Dot(head.u), d.Dot(head.v)
+	}
+	if du != 0 || dv != 0 {
+		f.ShiftField(-du, -dv)
+	}
+	comp := &s.g.comps[i]
+	var err error
+	if sh := s.g.shapes[i]; sh != nil && !stopLike(comp.Type) {
+		applyShapeMask(f, sh)
+	}
+	if el := s.g.elements[i]; el != nil {
+		err = el.Apply(f, &s.ctx)
+	}
+	if du != 0 || dv != 0 {
+		f.ShiftField(du, dv)
+	}
+	return err
+}
+
+// zeroField clears every component of f in place.
+func (s *sceneSim) zeroField(f *Field) {
+	for i := range f.Ex {
+		f.Ex[i] = 0
+	}
+	if f.Polarized {
+		for i := range f.Ey {
+			f.Ey[i] = 0
+		}
+	}
+	if f.Vectorial && f.Ez != nil {
+		for i := range f.Ez {
+			f.Ez[i] = 0
+		}
+	}
+}
+
+// addFieldInto adds src into dst component-wise.
+func addFieldInto(dst, src *Field) {
+	for i := range dst.Ex {
+		dst.Ex[i] += src.Ex[i]
+		if dst.Polarized && src.Ey != nil {
+			dst.Ey[i] += src.Ey[i]
+		}
+		if dst.Vectorial && dst.Ez != nil && src.Ez != nil {
+			dst.Ez[i] += src.Ez[i]
+		}
+	}
 }
 
 // fieldPower returns the total power carried by a field (W).
@@ -697,6 +789,14 @@ func (g *sceneGraph) buildElements() error {
 		// (applyComponent multiplies by the outline).
 		delete(params, "x")
 		delete(params, "y")
+		if c.Type == "diffuser" {
+			// The random screen is a physical object, so anchor it to the
+			// element's lab coordinates: translating the component then
+			// slides the screen under the beam and changes the speckle
+			// (evidence §9.4).
+			params["x"] = g.geoms[i].pos.X
+			params["y"] = g.geoms[i].pos.Y
+		}
 		if g.shapes[i] != nil {
 			if _, ok := params["aperture"]; ok {
 				params["aperture"] = 0

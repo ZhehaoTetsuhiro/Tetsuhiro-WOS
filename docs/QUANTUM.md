@@ -48,6 +48,8 @@
 - **二阶相干度** `g²(0) = ⟨n(n−1)⟩ / ⟨n⟩²`：相干态 = 1，热态/双模压缩约化态 = 2，单光子 = 0，Fock \|n⟩ = 1−1/n。
 - **正交分量** `⟨x_θ⟩` 与 `Var(x_θ)`：压缩真空低于 1/4（低于散粒噪声），乘积 ≥ 1/16（海森堡极限，纯态取等号）。
 - **联合分布** `P(na, nb)`（任意模式对）：用于 Hong-Ou-Mandel 符合计数、EPR 关联。
+- **全模式联合分布** `P(n0,…,n_{M−1})`：长度 `(cutoff+1)^M`，下标与态矢量同（little-endian）。3+ 模符合、玻色采样与后选择判据只能从这里读；两两联合分布只是它的边缘。
+- **后选择**：投影到「指定模式的光子数等于给定值」的子空间并归一化（`Postselect{Modes, Counts}`），同时给出该模式串的概率 `postselect_probability`。这是 KLM 等 heralded 门的接口。
 - **保真度** `F = |⟨ψ|φ⟩|²`；**范数**（幺正性检验）。
 
 ## 5. 标志性效应（测试覆盖）
@@ -81,14 +83,23 @@
     {
       "modes": 2, "cutoff": 4,
       "state": {"type": "fock", "params": {"occupation": [1,1]}},
-      "gates": [{"type": "beam_splitter", "params": {"mode0":0, "mode1":1, "reflectivity":0.5}}]
+      "gates": [{"type": "beam_splitter", "params": {"mode0":0, "mode1":1, "reflectivity":0.5}}],
+      "postselect": {"modes": [1], "counts": [0]}     // 可选：只留"模式 1 为空"的分支
     }
 
-返回 `mean_photons`、`g2`、`photon_distributions`（每模 P(n)）、`quadratures`（mean_x/var_x/mean_p/var_p）、`joint_distributions`（"m0,m1" 拍平为 `(cutoff+1)²` 数组，下标 `a*(cutoff+1)+b`）。
+返回 `mean_photons`、`g2`、`photon_distributions`（每模 P(n)）、`quadratures`（mean_x/var_x/mean_p/var_p）、`joint_distributions`（`"m0,m1"` 拍平为 `(cutoff+1)²` 数组，下标 `a*(cutoff+1)+b`）、`joint_full`（全 M 模联合分布，`(cutoff+1)^M` 长，little-endian 下标），以及后选择时的 `postselect_probability`。
+
+    q, _ := optics.FockState(2, 4, []int{1, 1})   // |1,1⟩
+    q.BeamSplitter(0, 1, 0.5)                     // 50:50 分束器
+    fmt.Println(q.JointProb(1, 1))                // HOM：≈0
+    p, _ := q.Postselect([]int{1}, []int{0})      // 后选择"模式 1 为空"：p≈0.5，剩余态 |2,0⟩
+
+扩展接口（v1.3.0）：`QuantumResult.JointFull`（全模式联合分布）与 `QuantumConfig.Postselect`。3 模及以上的符合计数、KLM 后选择门都依赖它们。
 
 `POST /api/quantum?fmt=png` 返回同一结果的 PNG 图表（上方每模光子数分布柱状图，下方第一对模式联合分布热图，对数标度）。Go 库等价：`server.RenderQuantumPNG(path, res)`。
 
 ## 7. 限制
 
-- 光子数截断 `cutoff ≤ 20`、模式数 `≤ 4`（`SimulateQuantum` 校验）。截断误差随 `cutoff` 增大按 `tanh(r)^{2·cutoff}` 量级衰减；密度矩阵后端（热态/损耗）内存为 Dim²，模式多、截断大时成本更高。
-- 线性光学：不含 Kerr 非线性、腔、光-物质相互作用等（留待扩展）。密度矩阵保真度（Uhlmann）未实现，可用迹/可观测统计代替。
+- 模式/截断上限由状态空间决定：模式数 `≤ 16`、截断 `≤ 64`，且 `(cutoff+1)^modes ≤ 2^20`（密度矩阵后端 `≤ 2^10`）。因此 5–8 模、截断 1–2 的电路（KLM、玻色采样）可用，4 模截断 20 照旧。截断误差随 `cutoff` 增大按 `tanh(r)^{2·cutoff}` 量级衰减；密度矩阵内存为 Dim²，成本更高。
+- 线性光学量子电路本身不含非线性；KLM 的「非线性」来自单光子测量 + 后选择，已由 `Postselect` 接口支持。波动光学内核侧的 Kerr / 可饱和吸收元件见 PHYSICS.md。
+- 密度矩阵保真度（Uhlmann）未实现，可用迹/可观测统计代替。
