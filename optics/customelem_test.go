@@ -310,16 +310,39 @@ func TestDefinitionDirsSignatureTracksAddEditRemove(t *testing.T) {
 }
 
 // A definition overwritten with byte-identical size still changes the
-// fingerprint (mtime carries it), which is what makes a poll reliable for
-// editors that rewrite a file in place.
+// fingerprint, which is what makes a poll reliable for editors that rewrite a
+// file in place. "改过的透镜" is the same number of bytes as "超表面透镜", so a
+// size-only fingerprint would miss it.
 func TestDefinitionDirsSignatureSeesSameSizeEdit(t *testing.T) {
 	dir := t.TempDir()
 	writeDef(t, dir, "metalens", metalensJSON)
 	first := DefinitionDirsSignature([]string{dir})
-	writeDef(t, dir, "metalens", strings.Replace(metalensJSON, "超表面透镜", "覆盖过的透镜", 1))
-	second := DefinitionDirsSignature([]string{dir})
-	if first == second {
+	writeDef(t, dir, "metalens", strings.Replace(metalensJSON, "超表面透镜", "改过的透镜", 1))
+	if second := DefinitionDirsSignature([]string{dir}); first == second {
 		t.Fatal("an in-place rewrite must change the signature")
+	}
+}
+
+// The same rewrite with the modification time pinned back to the original
+// value: a same-size edit written inside one timestamp tick leaves name, size
+// *and* mtime identical — the ordinary case on tmpfs, overlayfs and many
+// network mounts. Only the content hash can report it; a size-and-mtime
+// fingerprint fails here, and so does the watcher, silently, until a restart.
+func TestDefinitionDirsSignatureSeesSameSizeSameMTimeEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := writeDef(t, dir, "metalens", metalensJSON)
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := DefinitionDirsSignature([]string{dir})
+
+	writeDef(t, dir, "metalens", strings.Replace(metalensJSON, "超表面透镜", "改过的透镜", 1))
+	if err := os.Chtimes(path, fi.ModTime(), fi.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if second := DefinitionDirsSignature([]string{dir}); second == first {
+		t.Fatal("a same-size edit at the same modification time must still change the signature")
 	}
 }
 

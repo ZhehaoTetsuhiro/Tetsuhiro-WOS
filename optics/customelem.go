@@ -2,6 +2,8 @@ package optics
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -784,13 +786,23 @@ func ParamsFromStrings(name string, raw map[string]string) (map[string]any, erro
 }
 
 // DefinitionDirsSignature fingerprints the definition files in dirs: each
-// directory's path, then every .json file's name, size and modification time,
-// in sorted order. Two calls differ whenever a definition is added, edited or
-// removed, which is what a poller needs — the newest-file modification time it
-// replaces could only ever rise, so deleting the most recently written
-// definition looked like "no change" and the deleted element stayed registered
-// until a restart (or an explicit reload). Only .json files count, so dropping
-// an unrelated file into the directory does not trigger a reload.
+// directory's path, then every .json file's name, size, modification time and
+// content hash, in sorted order. Two calls differ whenever a definition is
+// added, edited or removed, which is what a poller needs — the newest-file
+// modification time it replaces could only ever rise, so deleting the most
+// recently written definition looked like "no change" and the deleted element
+// stayed registered until a restart (or an explicit reload). Only .json files
+// count, so dropping an unrelated file into the directory does not trigger a
+// reload.
+//
+// The content hash is what keeps the fingerprint honest about in-place
+// rewrites: size and mtime alone are not enough. A same-length edit written
+// within one timestamp tick leaves both unchanged, which is the ordinary case
+// on tmpfs, overlayfs and many network mounts, where timestamp granularity is
+// far coarser than the write path — the edit would go unnoticed until the next
+// restart. Hashing the bytes (definitions are small JSON documents, read once
+// per poll) makes the signature depend on the content itself, so the watcher
+// sees every rewrite on every file system.
 func DefinitionDirsSignature(dirs []string) string {
 	var b strings.Builder
 	for _, dir := range dirs {
@@ -809,7 +821,8 @@ func DefinitionDirsSignature(dirs []string) string {
 		}
 		sort.Strings(files)
 		for _, name := range files {
-			info, err := os.Stat(filepath.Join(dir, name))
+			path := filepath.Join(dir, name)
+			info, err := os.Stat(path)
 			if err != nil {
 				b.WriteString(name + "	missing\n")
 				continue
@@ -819,6 +832,16 @@ func DefinitionDirsSignature(dirs []string) string {
 			b.WriteString(strconv.FormatInt(info.Size(), 10))
 			b.WriteByte('	')
 			b.WriteString(strconv.FormatInt(info.ModTime().UnixNano(), 10))
+			b.WriteByte('	')
+			if data, rerr := os.ReadFile(path); rerr != nil {
+				// Unreadable this poll (permissions, removed in between): say
+				// so instead of reusing a stale hash, and let the next poll
+				// look again.
+				b.WriteString("unreadable")
+			} else {
+				sum := sha256.Sum256(data)
+				b.WriteString(hex.EncodeToString(sum[:]))
+			}
 			b.WriteByte('\n')
 		}
 	}
