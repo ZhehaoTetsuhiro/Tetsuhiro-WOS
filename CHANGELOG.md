@@ -2,6 +2,33 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.3.0] - 2026-10-03
+
+本版落实下游 Light-Coding 在 `docs/04-EVIDENCE.md` §9.2–§9.7 提出的六项 WOS 上游愿望单：scene 共面元件语义、无损监视探测器、漫射体屏锚定、量子全模式联合分布与后选择、强度相关折射率/可饱和吸收元件。
+
+### 新增
+
+- **非线性元件：`kerr` 与 `saturable_absorber`（强度相关内核原语）**。此前所有元件都是线性的（`medium` 的折射率与强度无关），A3（腔往返迭代/光学 Ising）、阈值/条件逻辑与真正非线性的 D2NN 层因此无法仿真。
+  - `kerr`：薄克尔片，相位 `φ(x,y)=k·n₂·I(x,y)·L`（`I=|E|²`，单位 W/m²），可选双光子吸收 `β·I·L`。
+  - `saturable_absorber`：`α(I)=α₀/(1+I/I_sat)`，弱光被吸收、强光透过（阈值/双稳的幅值原语）。
+  - 两者都按逐点强度作用，支持标量/矢量场，已注册进 catalog（GUI 可直接选）。
+- **量子内核：全模式联合分布 `QuantumResult.JointFull`**。给出 `(cutoff+1)^modes` 长度的完整 `P(n₀,n₁,…)`（little-endian 下标），3+ 模的符合计数与玻色采样不再受「只有两两边缘分布」限制。
+- **量子内核：后选择接口 `QuantumConfig.Postselect{Modes,Counts}`**。投影到「指定模式光子数等于给定值」的子空间并归一化（纯态与密度矩阵后端都支持），结果多一个 `postselect_probability`。这是 KLM 这类 heralded（测量诱导）门的接口。
+- **量子内核：模式/截断上限改为按状态空间校验**。由固定「模式数 ≤4、截断 ≤20」改为 模式数 ≤16、截断 ≤64，且 `(cutoff+1)^modes ≤ 2^20`（密度矩阵后端 `≤ 2^10`）。于是 5–8 模、截断 1–2 的 KLM/玻色采样电路可用，而 4 模截断 20 的行为完全不变。
+- **scene 无损监视探测器**：`sensor` 新增 `passthrough`（或 `monitor`）参数——记录该面后让光继续，**一次运行即可读多个端口**；不带该参数时仍是吸收光、终结光路的普通探测器。
+
+### 修复
+
+- **共面元件不再被判成环路、整条光路被丢弃（EVIDENCE §9.3）**。此前在同一 z 放两个 `aperture` 会让路由器把两元件间的零长往返看成谐振腔，报出 `scene_cycle_dropped` 并返回 `planes: []`（一条告警、零个读出，极难排查）。现在同一平面（同一朝向、偏移在 1 nm 内）的**薄元件合并为一个平面只通过一次**：默认**串联**（透过率相乘，即两片薄元件叠在同一平面），并补一条 `scene_geometry` 提示列出该平面上的元件；组内非头元件会先平移到自身位置再作用、再平移回来（否则副元件会错误地以头元件位置作用）。
+- **共面元件可选并联合成（EVIDENCE §9.2）**。串联对两个**互不相交**的子孔径等于求交（结果≈0）；给元件加 `parallel: true` 即改为**并集**（并排图案，各元件只在自己轮廓内作用后相加）。实测两条相同的缝：串联透过 ≈5.1e-36（数值零），并联 = 9.82e-5，恰为单缝 4.91e-5 的两倍。
+- **`diffuser` 的随机屏锚定到元件物理坐标（EVIDENCE §9.4）**。此前相位屏按网格数组下标生成、与元件位置无关，平移漫射体 100 µm 散斑几乎不变（r≈0.996）→ 做不了「密钥位移敏感度」研究。现在白噪声由**元件物理坐标格**的哈希生成（`hashNoise01`），平移元件即让屏在光束下平移：同样 100 µm 平移，散斑相关从 0.996 降到 **0.318**；同位置同种子仍逐位可复现（r=1）。
+
+### 校验
+
+- 新增 4 个测试文件、16 条用例：`scene_plane_test.go`（共面合成/并联并集/多端口监视/普通探测器仍终止）、`diffuser_anchor_test.go`（位移敏感 + 种子可复现）、`quantum_full_test.go`（3 模联合分布与边缘一致、6 模可用与越界拒绝、纯态/密度矩阵后选择、概率为零不崩）、`nonlinear_test.go`（Kerr 相位 ∝ 强度、双光子吸收、可饱和吸收随强度变大、场景内非线性相位为纯相位）。
+- `go test ./...` 全通过（`optics` 121 s、`server`）；`go vet ./...`、`gofmt -l` 干净。
+- 复现数字：共面双缝串联 ≈5.1e-36、并联 9.82e-5（单缝 4.91e-5）；漫射体位移 100 µm 散斑 r 0.996→0.318；HOM 后选择（模式 1 为空）p=0.5、剩余态 ⟨n₀⟩=2。
+
 ## [v1.2.0] - 2026-10-03
 
 ### 新增
@@ -278,7 +305,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...HEAD
+[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.3.0...HEAD
+[v1.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.2.0...v1.3.0
 [v1.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...v1.2.0
 [v1.1.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...v1.1.1
 [v1.1.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...v1.1.0
