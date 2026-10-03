@@ -2,6 +2,31 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.2.0] - 2026-10-03
+
+### 新增
+
+- **GPU 加速（可选，需 `-tags cuda`；默认构建与纯 Go 单二进制分发完全不变）**：内核自带 CUDA/cuFFT 后端，`fft2D` / `fft1DAny` 在启用时分派给 GPU，因此**所有走 FFT 的路径**（角谱 `asm`/`asm_pad`/`asm_shift`/`asm_shift_pad`、Fresnel、Fraunhofer、薄元件、Berreman、相干度、场指标等）都自动受益。
+  - **实现**（`optics/gpu.go`，`//go:build cuda`）：cuFFT **Z2Z（double）单次 2-D 变换**替代逐行/逐列（含非 2 的幂长度，cuFFT 原生支持）；显存缓冲按字节大小做自由表复用（`gpuAlloc`/`gpuRelease`），不再每次 `cudaMalloc`/`cudaFree`；所有显存拷贝与 cuFFT 执行经**单一互斥量**串行化（cuFFT 句柄并发执行无保证）。纯 Go 实现保留为 `fft2DCPU` / `fft1DAnyCPU`，既是回退也是基准对照。
+  - **默认构建**（`optics/gpu_stub.go`）：同一组 API 恒报不可用；`optics.SetGPU`/`GPUEnabled`/`GPUAvailable`/`GPUBackendInfo` 与不带标签时行为、结果一致。
+  - **启用**：`wos -gpu` 或环境变量 `WOS_GPU=1`；启用成功时启动日志打印设备名，没有设备或未带标签时提示后继续用 CPU。阈值 `gpuMin2D=64`（2-D 边长）、`gpuMin1D=1024`（1-D 长度），小于此传输开销大于收益。
+  - **实测**（Tesla T4，`-bench FFT2D`，单次含显存往返）：1024² CPU 14 ms / GPU 12 ms（**1.1×**）；2048² 57 ms / 45 ms（**1.3×**）；4096² 331 ms / 179 ms（**1.85×**）。吞吐受 PCIe 往返与 T4 较弱的 FP64 算力限制，网格越大越划算。
+  - **未做**：真正「驻留显存」的多平面光路（把 `ctx.transfer` / `applyMediumPhase` 的逐像素循环下推成 CUDA 内核）需要 nvcc 编译的 `.cu`，当前后端只依赖运行库（cudart/cuFFT），因此 `go build -tags cuda` **不需要 nvcc**；本机实测页锁定（pinned）暂存内存反而更慢（4.1 GB/s vs 可分页 6.8 GB/s），故未启用。
+  - 详见 `docs/GPU.md` 第 7 节与 README「GPU 加速」章节。
+
+### 修复
+
+- **定义指纹加入内容哈希：同尺寸改写落在同一个时间戳 tick 内不再漏检**。v1.1.1 的指纹是每个 `.json` 的**文件名、大小、修改时间**（`optics/customelem.go` 的 `DefinitionDirsSignature`）；在时间戳粒度粗的文件系统（tmpfs、overlayfs、部分网络挂载）上，「等长改写」若发生在同一个时间戳 tick 内，大小与 mtime **都不变**，指纹因此不变 → `watchElements`（`cmd/wos/main.go`）看不到变化，改动要等重启才生效。现在指纹额外带上每个文件内容的 **SHA-256**，判据落在字节本身：等长改写、mtime 被改回原值、`touch -r` 之后重新写入都能被发现，任何文件系统上都不再依赖时间戳精度。
+  - 回归测试：新增 `TestDefinitionDirsSignatureSeesSameSizeSameMTimeEdit`（等长改写后把 mtime 显式改回原值，指纹仍必须变化；在旧指纹下该用例失败）。
+  - 顺带修正 `TestDefinitionDirsSignatureSeesSameSizeEdit`：它原先的替换串是 5 字 → 6 字（15 → 18 字节），**字节数其实变了**，从未真正覆盖「同尺寸」路径。
+  - 代价：轮询每次读取并哈希定义文件（每 2 秒一次、都是几十行的小 JSON），实测无感。
+
+### 校验
+
+- `go test ./...` 全通过；`go vet ./...`、`gofmt -l` 干净。
+- 指纹用例（新增/改写/删除 + 等长改写 + 等长改写且 mtime 回改）连跑 10 次：**10/10 通过**（修复前，同一批用例在容器 overlay 临时目录上约 50% 失败；已用无 GPU 改动的干净工作树对照，失败率一致，确认是既有问题）。
+- `go build ./...` 与 `go build -tags cuda ./...` 均通过；`go test -tags cuda ./...` 全通过（含 `TestGPUFFT2DMatchesCPU`、`TestGPUFFT1DMatchesCPU`、`TestGPUASMPropagationMatchesCPU`，与 CPU 的相对误差 < 1e-9）。
+
 ## [v1.1.1] - 2026-10-02
 
 ### 修复
@@ -254,6 +279,7 @@
 - **精度验证**：内建 18 项物理与数值测试。
 
 [未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...HEAD
+[v1.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...v1.2.0
 [v1.1.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...v1.1.1
 [v1.1.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.2...v1.1.0
 [v1.0.2]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.0.1...v1.0.2
