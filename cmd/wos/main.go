@@ -35,10 +35,21 @@ func main() {
 	maxMB := flag.Int64("max-run-mb", 512, "in-memory budget for stored run data")
 	extraDirs := flag.String("elements", "", "额外的元件定义目录（逗号分隔，优先级高于默认目录）")
 	check := flag.Bool("check-elements", false, "只校验元件定义文件，打印结果后退出")
+	gpu := flag.Bool("gpu", false, "启用 GPU（CUDA/cuFFT）加速（需以 -tags cuda 构建；等价于环境变量 WOS_GPU=1）")
 	genGo := flag.String("gen-go", "", "把元件定义文件导出为 Go 原生元件源码（打印到 stdout）")
 	genName := flag.String("gen-name", "", "导出元件的类型名（默认使用定义文件里的 name）")
 	noWatch := flag.Bool("no-elements-watch", false, "关闭元件定义文件的自动重载（默认每 2 秒检查一次）")
 	flag.Parse()
+
+	if *gpu {
+		if optics.SetGPU(true) {
+			log.Printf("GPU 加速已启用: %s", optics.GPUBackendInfo())
+		} else {
+			log.Printf("-gpu 已指定但不可用（未以 -tags cuda 构建，或机器上没有 CUDA 设备）；继续使用 CPU")
+		}
+	} else {
+		log.Printf("计算后端: %s", optics.GPUBackendInfo())
+	}
 
 	if *genGo != "" {
 		if err := runGenGo(*genGo, *genName); err != nil {

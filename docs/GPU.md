@@ -46,3 +46,25 @@
 ## 6. 状态
 
 当前仅落地本设计文档；未引入 cgo/CUDA 依赖，以维持零依赖单二进制分发。
+
+## 7. 实现状态（已落地，2026-10）
+
+第 1、3 节的设计已实现于 `optics/gpu.go`（`//go:build cuda`）与 `optics/gpu_stub.go`（默认构建）：
+
+- 分派点：`fft2D` / `fft1DAny` 在启用时调用 `gpuFFT2D` / `gpuFFT1D`；纯 Go 实现保留为
+  `fft2DCPU` / `fft1DAnyCPU`，任何 CUDA 调用失败即回退，所以无 GPU 机器结果不变。
+- cuFFT Z2Z（double）单次 2-D 变换替代逐行/逐列；任意长度（含非 2 的幂）由 cuFFT 原生支持。
+- 显存缓冲按字节大小做自由表复用（`gpuAlloc`/`gpuRelease`），避免每次 `cudaMalloc/cudaFree`。
+- 线程安全：所有显存拷贝与 cuFFT 执行经单一互斥量串行化（句柄并发执行无保证）。
+- 启用：`-gpu` 命令行开关或 `WOS_GPU=1`；`optics.SetGPU/GPUEnabled/GPUAvailable/GPUBackendInfo`。
+- 阈值：`gpuMin2D=64`、`gpuMin1D=1024`（小于此的网格传输开销大于收益）。
+
+实测（Tesla T4，`-bench FFT2D`，单次含往返）：1024² CPU 14 ms / GPU 12 ms（1.1×）；
+2048² 57 ms / 45 ms（1.3×）；4096² 331 ms / 179 ms（1.85×）。
+
+未做（后续可加）：真正“驻留显存”的多平面光路（把 `ctx.transfer`/`applyMediumPhase` 的逐像素循环
+下推为 CUDA 内核，目标是每次传播只做一次 H2D/D2H）；本条需引入 nvcc 编译的 `.cu` 内核，
+而当前后端只依赖运行库（cudart/cuFFT），保持 `go build -tags cuda` 无需 nvcc。
+
+实测补充：页面锁定（pinned）暂存内存在本机反而更慢（4.1 GB/s vs 可分页 6.8 GB/s），
+故未启用 pinned 路径；`gpuHostAlloc/gpuCopyH2D/gpuCopyD2H` 保留给基准与将来设备使用。

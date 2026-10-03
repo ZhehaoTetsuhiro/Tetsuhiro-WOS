@@ -129,9 +129,21 @@ var colBufPool = sync.Pool{New: func() any {
 }}
 
 // fft1DAny transforms a 1-D complex array of arbitrary length in place,
-// using the cached radix-2 core for power-of-two sizes and the Bluestein
-// (chirp-z) algorithm otherwise. It is the single entry point for 1-D FFTs.
+// using the GPU (cuFFT) backend when enabled, else the cached radix-2 core for
+// power-of-two sizes and the Bluestein (chirp-z) algorithm otherwise. It is the
+// single entry point for 1-D FFTs.
 func fft1DAny(a []complex128, inverse bool) {
+	if gpuReady() && len(a) >= gpuMin1D {
+		if err := gpuFFT1D(a, inverse); err == nil {
+			return
+		}
+	}
+	fft1DAnyCPU(a, inverse)
+}
+
+// fft1DAnyCPU is the pure-Go 1-D FFT of arbitrary length (radix-2 core for
+// power-of-two sizes, Bluestein otherwise).
+func fft1DAnyCPU(a []complex128, inverse bool) {
 	n := len(a)
 	if n&(n-1) == 0 {
 		fft1D(a, planFFT(n), inverse)
@@ -193,10 +205,21 @@ func fft1DBluestein(a []complex128, inverse bool) {
 
 // fft2D transforms a (length n*n, row-major) in place.
 // A forward 2-D transform maps f(x,y) -> sum f exp(-i 2pi (fx x + fy y)).
+// When the GPU backend is enabled it runs as one cuFFT Z2Z transform.
 func fft2D(a []complex128, n int, inverse bool) {
+	if gpuReady() && len(a) == n*n && n >= gpuMin2D {
+		if err := gpuFFT2D(a, n, inverse); err == nil {
+			return
+		}
+	}
+	fft2DCPU(a, n, inverse)
+}
+
+// fft2DCPU is the pure-Go 2-D FFT (rows, then strided columns in parallel).
+func fft2DCPU(a []complex128, n int, inverse bool) {
 	// Rows.
 	parFor(n, func(r int) {
-		fft1DAny(a[r*n:(r+1)*n], inverse)
+		fft1DAnyCPU(a[r*n:(r+1)*n], inverse)
 	})
 	// Columns (stride n), each worker with its own scratch.
 	parFor(n, func(c int) {
@@ -210,7 +233,7 @@ func fft2D(a []complex128, n int, inverse bool) {
 		for r := 0; r < n; r++ {
 			col[r] = a[r*n+c]
 		}
-		fft1DAny(col, inverse)
+		fft1DAnyCPU(col, inverse)
 		for r := 0; r < n; r++ {
 			a[r*n+c] = col[r]
 		}

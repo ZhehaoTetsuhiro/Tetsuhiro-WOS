@@ -76,7 +76,7 @@
 | docs/INTEGRATION.md | **接入说明**：作为 Go 库嵌入、HTTP 接入（curl/JS/Python）、量子接口、二进制格式、性能与精度调参 |
 | docs/API.md | HTTP API 参考（端点、参数、错误） |
 | docs/GUI.md | GUI 键盘/鼠标操作完整指南 |
-| docs/GPU.md | GPU 加速设计（可选/远期，当前未引入 cgo/CUDA 依赖） |
+| docs/GPU.md | **GPU 加速**：cuFFT 后端（`-tags cuda`）、启用方式、实测对比与限制 |
 
 ## 性能参考（8 核，标量模式）
 
@@ -87,3 +87,31 @@
 | 2048² | ~0.7 s | ~7 s（约 128 MB/平面） |
 
 琼斯偏振开启时成本 ×2（两个分量）；全矢量模式（Ez）成本 ×3。
+
+## GPU 加速（可选，需 `-tags cuda`）
+
+内核自带一个可选的 CUDA / cuFFT 后端，把 `fft2D` / `fft1DAny` 分派给 GPU，因此**所有走 FFT 的路径**
+（角谱 asm/asm_pad/asm_shift/asm_shift_pad、Fresnel、Fraunhofer、薄元件、Berreman、相干度、场指标等）
+都自动受益。默认不启用，纯 Go 单二进制分发不受影响；无 CUDA 设备或未加标签时安全回退 CPU。
+
+    # 构建（需 CUDA toolkit：nvcc + libcufft）
+    go build -tags cuda -o wos ./cmd/wos
+
+    # 启用：命令行开关，或环境变量（二选一）
+    ./wos -gpu -addr :1120
+    WOS_GPU=1 ./wos -addr :1120
+
+启用成功时启动日志打印设备名；没有设备或未以 `-tags cuda` 构建时，`-gpu` 只会在日志提示后继续用 CPU。
+
+实测（Tesla T4，单次复数 double 2-D FFT，含显存往返；`go test -tags cuda -bench FFT2D ./optics/`）：
+
+| 网格 | CPU（8 核纯 Go） | GPU（cuFFT，含往返） | 加速比 |
+|---|---|---|---|
+| 1024² | ~14 ms | ~12 ms | ~1.1× |
+| 2048² | ~57 ms | ~45 ms | ~1.3× |
+| 4096² | ~331 ms | ~179 ms | ~1.85× |
+
+限制与取舍：吞吐受 PCIe 往返与 T4 较弱的 FP64 算力限制，小网格反而得不偿失，故设了阈值
+（2-D 边 ≥64、1-D 长度 ≥1024 才走 GPU）；GPU 调用串行化以保证 cuFFT 句柄与显存安全。
+GPU 与 CPU 的一致性由 `go test -tags cuda ./optics/` 的 GPU 用例验证（2-D/1-D 往返以及 asm/asm_pad
+整步传播，相对误差 < 1e-9）。详见 docs/GPU.md。
