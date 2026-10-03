@@ -1,0 +1,6 @@
+# 构建上下文里不需要的东西（镜像只 COPY dist/wos 与 elements/）
+.git
+.gocache/
+/.release/
+/.tmp/
+/GRT/

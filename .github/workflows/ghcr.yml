@@ -1,0 +1,87 @@
+name: 容器镜像（ghcr.io）
+
+# 发布通道之二：把 WOS 打成容器镜像推到 GitHub Packages（ghcr.io）。
+# 手工触发（选一个已发布的标签）：Actions → 本工作流 → Run workflow
+# 自动触发：push 任何 v* 标签时。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建的发布标签（例如 v1.3.0）'
+        required: true
+        default: 'v1.3.0'
+  push:
+    tags: ['v*']
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 解析标签
+        id: rel
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="${{ github.ref_name }}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "构建 $TAG 的镜像"
+
+      - name: 取源码（对应标签的提交）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.rel.outputs.tag }}
+          fetch-depth: 0
+
+      - name: 装 Go（与 Release 相同的工具链）
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.10'
+
+      - name: 编译静态二进制（与 Release 相同的标志）
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0 GOEXPERIMENT=nodwarf5 GOFLAGS=
+          go build -trimpath -ldflags="-s -w" -o dist/wos ./cmd/wos
+          ls -l dist/wos
+          sha256sum dist/wos
+          go version -m dist/wos | head -3
+
+      - name: 与已发布的二进制比对（同一提交应当逐位相同）
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.rel.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern wos-linux-amd64 --dir /tmp/rel || true
+          if [ -f /tmp/rel/wos-linux-amd64 ]; then
+            echo "Release 资产 : $(sha256sum /tmp/rel/wos-linux-amd64 | cut -d' ' -f1)"
+            echo "本次 CI 构建 : $(sha256sum dist/wos | cut -d' ' -f1)"
+            if cmp -s /tmp/rel/wos-linux-amd64 dist/wos; then
+              echo "=> 逐位一致"
+            else
+              echo "=> 有差异（镜像仍可用，但并非字节相同的二进制）"
+            fi
+          else
+            echo "该标签尚无 Release 资产（例如标签先于发布创建），跳过比对"
+          fi
+
+      - name: 构建并推送镜像
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/$OWNER/tetsuhiro-wos"
+          TAG="${{ steps.rel.outputs.tag }}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -f docker/Dockerfile \
+            --build-arg VERSION="$TAG" \
+            --build-arg REVISION="$(git rev-parse HEAD)" \
+            -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          docker image inspect "$IMAGE:$TAG" --format '{{.Id}} {{.Size}} bytes'
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+          docker image inspect "$IMAGE:$TAG" --format 'digest: {{index .RepoDigests 0}}'

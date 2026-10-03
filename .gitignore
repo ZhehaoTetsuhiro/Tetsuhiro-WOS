@@ -10,6 +10,8 @@
 
 # 发布产物（二进制与 zip，构建产物）
 /.release/
+# 容器镜像构建上下文里的二进制（docker/Dockerfile 的 COPY 来源）
+/dist/
 
 # 临时输出（栅格图 / 剖面 SVG 等运行产物）
 /GRT/
