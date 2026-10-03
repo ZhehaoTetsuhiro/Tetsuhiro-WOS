@@ -31,10 +31,12 @@
 | `wos-linux-amd64` / `wos-linux-amd64.zip` | Linux x86-64（zip 内含二进制 + 说明） |
 | `wos-windows-amd64.exe` / `wos-windows-amd64.zip` | Windows x86-64（zip 内含 exe + 说明） |
 
-容器镜像：
+容器镜像（`linux/amd64`，Alpine 基础镜像，内置 `elements/` 元件定义，默认监听 `:1120`，另有 `latest` 标签）：
 
     docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.3.0
     docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.3.0
+
+镜像由 `.github/workflows/ghcr.yml` 从标签提交用与 Release 完全相同的工具链与标志编译（`go1.25.10`、`-trimpath -ldflags="-s -w"`、`CGO_ENABLED=0`、`GOEXPERIMENT=nodwarf5`），因此**镜像里的 `wos` 与 Release 里的 `wos-linux-amd64` 逐位相同**。手工构建见 `docker/Dockerfile`。
 
 ## 快速开始
 
