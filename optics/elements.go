@@ -154,6 +154,7 @@ func smoothStep(d, sigma float64) complex128 {
 
 func init() {
 	RegisterElement("lens", newLens)
+	RegisterElement("cylindrical_lens", newCylLens)
 	RegisterElement("aperture", newAperture)
 	RegisterElement("apodizer", newApodizer)
 	RegisterElement("grating", newGrating)
@@ -209,6 +210,57 @@ func (e *lensEl) Apply(f *Field, ctx *Context) error {
 				continue
 			}
 			t := cexpI(c * r2)
+			f.Ex[j*n+i] *= t
+			if f.Polarized {
+				f.Ey[j*n+i] *= t
+			}
+		}
+	}
+	return nil
+}
+
+// ---- cylindrical lenses ----------------------------------------------------
+
+// cylLensEl is a thin lens with power in one in-plane direction only: its phase
+// is exp(-i k u^2/(2f)) with u = (cos rotation, sin rotation), so the
+// perpendicular direction is untouched. It is what makes a cylindrical (1-D)
+// geometry possible in a 2-D grid: focus a grating's dispersion direction while
+// the groove direction stays invariant, and every order is drawn out into a
+// spectral line instead of a point (see the 衍射光栅光谱 preset).
+type cylLensEl struct {
+	f, aperture, x0, y0, rotation float64
+}
+
+func newCylLens(p map[string]any) (Element, error) {
+	f, err := pf(p, "f", 0.1)
+	if err != nil || f == 0 {
+		return nil, fmt.Errorf("cylindrical_lens: focal length f must be non-zero")
+	}
+	return &cylLensEl{
+		f: f, rotation: pfd(p, "rotation", 0),
+		aperture: pfd(p, "aperture", 0), x0: pfd(p, "x", 0), y0: pfd(p, "y", 0),
+	}, nil
+}
+
+func (e *cylLensEl) Apply(f *Field, ctx *Context) error {
+	k := 2 * math.Pi / ctx.Wavelength
+	c := -k / (2 * e.f)
+	cr, sr := math.Cos(e.rotation), math.Sin(e.rotation)
+	ap := e.aperture
+	n := f.N
+	for j := 0; j < n; j++ {
+		dy := f.Y(j) - e.y0
+		for i := 0; i < n; i++ {
+			dx := f.X(i) - e.x0
+			if ap > 0 && dx*dx+dy*dy > ap*ap {
+				f.Ex[j*n+i] = 0
+				if f.Polarized {
+					f.Ey[j*n+i] = 0
+				}
+				continue
+			}
+			u := cr*dx + sr*dy
+			t := cexpI(c * u * u)
 			f.Ex[j*n+i] *= t
 			if f.Polarized {
 				f.Ey[j*n+i] *= t

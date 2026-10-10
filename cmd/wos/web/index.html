@@ -8,6 +8,18 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="splash" class="splash" aria-label="启动画面">
+  <div class="splashInner">
+    <div class="splashMast">
+      <p class="splashSub">波动光学模拟器 · Wave Optics Simulator</p>
+      <h1 class="splashTitle">Tetsuhiro WOS</h1>
+    </div>
+    <div class="splashRule" aria-hidden="true"></div>
+    <div class="splashFoot">
+      <p class="splashQuote">光走过每一条可能的路径，干涉图样是它们彼此相认的证据。</p>
+    </div>
+  </div>
+</div>
 <header>
   <h1>Tetsuhiro WOS <span class="version">v1.3.0</span></h1>
   <div class="status" id="status" role="status" aria-live="polite">加载中…</div>
@@ -21,6 +33,11 @@
   </span>
   <button id="runBtn" title="运行模拟 (空格)">▶ 运行</button>
   <button id="helpBtn" title="快捷键帮助 (?)">? 帮助</button>
+  <label class="themeToggle" title="主题：浅色＝天蓝色主色调，暗色＝黑底 + 蓝色系（选择会记住，下次打开沿用）">
+    <input type="checkbox" id="themeSwitch" role="switch" aria-label="暗色模式">
+    <span class="track" aria-hidden="true"><span class="knob"></span></span>
+    <span class="themeToggleText">暗色</span>
+  </label>
 </header>
 
 <main>

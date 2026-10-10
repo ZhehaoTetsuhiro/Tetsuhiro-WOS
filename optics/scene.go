@@ -805,7 +805,7 @@ func componentClass(t string) string {
 		return "detector"
 	case "aperture", "iris", "stop", "slit":
 		return "stop"
-	case "lens", "concave_lens", "axicon", "zone_plate", "spherical_mirror":
+	case "lens", "concave_lens", "cylindrical_lens", "axicon", "zone_plate", "spherical_mirror":
 		return "lens"
 	}
 	return "other"

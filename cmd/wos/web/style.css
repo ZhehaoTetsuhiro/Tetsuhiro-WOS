@@ -1,9 +1,73 @@
+/* 标题字体：Rajdhani 700（棱角分明的方切角无衬线，SIL OFL 1.1，见 fonts/LICENSE-Rajdhani.txt）。 */
+@font-face {
+  font-family: 'Rajdhani';
+  src: url('fonts/rajdhani-700.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
 :root {
   --bg: #cde6f5;
   --panel: rgba(251, 253, 255, 0.66);
   --panel2: rgba(228, 241, 250, 0.6);
   --fg: #14324a;
   --accent: #1976d2; --border: rgba(163, 203, 230, 0.7); --warn: #a06a00; --err: #c0392b;
+  /* 主题化配色：所有条目都能被暗色模式整体替换（浅色＝天蓝色主色调） */
+  --muted: #5a7d9e;        /* 次要文字：状态、hint、tag */
+  --muted2: #3d6285;       /* 画布上的提示文字 */
+  --label: #4a6d8f;        /* 参数标签、列表小标题 */
+  --ink: #33475c;          /* 指标与读数的正文色 */
+  --sel: #cfe3f7;          /* 选中项底色 */
+  --chip: rgba(25, 118, 210, 0.12);        /* 版本徽标底 */
+  --chip-border: rgba(25, 118, 210, 0.35);
+  --canvas-bg: #bfe0f3;    /* 图像画布底 */
+  --chip-bg: rgba(251, 253, 255, 0.9);
+  --chip-bg-soft: rgba(251, 253, 255, 0.85);
+  --overlay-bg: rgba(20, 50, 70, 0.45);
+  --warn-bg: #fdf3dd;
+  --err-bg: #fdeaea;
+  --mini-fg: #6b8399;
+  --mini-border: rgba(120, 150, 175, 0.5);
+  --mini-hover-fg: #2c4b68;
+  --mini-hover-border: rgba(90, 125, 158, 0.9);
+  --mini-hover-bg: rgba(233, 242, 250, 0.9);
+  --shadow: rgba(20, 50, 70, 0.25);
+  --body-bg:
+    radial-gradient(1100px 720px at 12% -8%, rgba(255, 255, 255, 0.9), transparent 60%),
+    radial-gradient(900px 680px at 100% 0%, rgba(185, 214, 240, 0.85), transparent 55%),
+    radial-gradient(820px 900px at 50% 118%, rgba(216, 199, 236, 0.7), transparent 60%),
+    linear-gradient(135deg, #d8edfb 0%, #cde6f5 45%, #ddd8f1 100%);
+}
+/* 暗色模式：纯黑底 + 蓝色系（保持天蓝色作为一个更亮的天蓝强调色） */
+html[data-theme="dark"] {
+  --bg: #05080e;
+  --panel: rgba(9, 17, 28, 0.72);
+  --panel2: rgba(18, 34, 54, 0.6);
+  --fg: #cfe4f7;
+  --accent: #4db8ff; --border: rgba(72, 130, 190, 0.45); --warn: #e0b053; --err: #ff7b72;
+  --muted: #7fa3c4;
+  --muted2: #8fb3d4;
+  --label: #8fb3d4;
+  --ink: #b8d4ea;
+  --sel: rgba(45, 105, 165, 0.55);
+  --chip: rgba(77, 184, 255, 0.16);
+  --chip-border: rgba(77, 184, 255, 0.42);
+  --canvas-bg: #060b12;
+  --chip-bg: rgba(10, 20, 32, 0.92);
+  --chip-bg-soft: rgba(10, 20, 32, 0.85);
+  --overlay-bg: rgba(0, 0, 0, 0.66);
+  --warn-bg: rgba(120, 90, 20, 0.3);
+  --err-bg: rgba(120, 40, 40, 0.32);
+  --mini-fg: #7e9cba;
+  --mini-border: rgba(90, 140, 190, 0.45);
+  --mini-hover-fg: #d7ecff;
+  --mini-hover-border: rgba(120, 180, 230, 0.9);
+  --mini-hover-bg: rgba(30, 60, 95, 0.85);
+  --shadow: rgba(0, 0, 0, 0.6);
+  --body-bg:
+    radial-gradient(1100px 720px at 12% -8%, rgba(22, 40, 62, 0.55), transparent 60%),
+    radial-gradient(900px 680px at 100% 0%, rgba(14, 30, 50, 0.6), transparent 55%),
+    radial-gradient(820px 900px at 50% 118%, rgba(10, 24, 42, 0.7), transparent 60%),
+    linear-gradient(135deg, #04070c 0%, #05080e 45%, #060a12 100%);
 }
 * { box-sizing: border-box; }
 /* hidden 属性必须真正隐藏元素，压过任何 display:flex 等规则 */
@@ -13,11 +77,7 @@ body {
   color: var(--fg);
   font: 13px/1.5 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   display: flex; flex-direction: column; overflow: hidden;
-  background:
-    radial-gradient(1100px 720px at 12% -8%, rgba(255, 255, 255, 0.9), transparent 60%),
-    radial-gradient(900px 680px at 100% 0%, rgba(185, 214, 240, 0.85), transparent 55%),
-    radial-gradient(820px 900px at 50% 118%, rgba(216, 199, 236, 0.7), transparent 60%),
-    linear-gradient(135deg, #d8edfb 0%, #cde6f5 45%, #ddd8f1 100%);
+  background: var(--body-bg);
 }
 header {
   display: flex; align-items: center; gap: 12px; padding: 6px 14px;
@@ -28,10 +88,10 @@ header {
 header h1 { font-size: 15px; margin: 0; letter-spacing: 1px; }
 header h1 .version {
   font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0;
-  background: rgba(25, 118, 210, 0.12); border: 1px solid rgba(25, 118, 210, 0.35);
+  background: var(--chip); border: 1px solid var(--chip-border);
   border-radius: 10px; padding: 1px 7px; margin-left: 6px; vertical-align: 2px;
 }
-.status { flex: 1; color: #5a7d9e; }
+.status { flex: 1; color: var(--muted); }
 main { flex: 1; display: flex; gap: 8px; padding: 6px; min-height: 0; }
 aside { width: 260px; min-width: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: none; }
 #center { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-y: auto; }
@@ -59,6 +119,8 @@ button:hover, select:hover { border-color: var(--accent); }
 }
 #runBtn:hover { background: #0a3a86; border-color: #0a3a86; box-shadow: 0 3px 8px rgba(13, 71, 161, 0.4); }
 #runBtn:active { background: #082f6d; border-color: #082f6d; }
+html[data-theme="dark"] #runBtn { background: #1565c0; border-color: #1565c0; }
+html[data-theme="dark"] #runBtn:hover { background: #1976d2; border-color: #1976d2; }
 :focus, :focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 5px;
 }
@@ -66,14 +128,14 @@ button:hover, select:hover { border-color: var(--accent); }
 /* element list */
 .el { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
   margin: 2px 0; padding: 5px 8px; border-radius: 5px; background: var(--panel2); }
-.el.sel { background: #cfe3f7; border-color: var(--accent); }
-.el .tag { color: #5a7d9e; font-size: 11px; margin-left: auto; }
-#breadcrumb { font-size: 12px; color: #4a6d8f; margin-bottom: 6px; min-height: 1.2em; }
+.el.sel { background: var(--sel); border-color: var(--accent); }
+.el .tag { color: var(--muted); font-size: 11px; margin-left: auto; }
+#breadcrumb { font-size: 12px; color: var(--label); margin-bottom: 6px; min-height: 1.2em; }
 #breadcrumb button { padding: 0 6px; font-size: 12px; }
 
 /* params */
 .prow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-.prow label { width: 130px; flex: none; text-align: right; font-size: 12px; color: #4a6d8f; }
+.prow label { width: 130px; flex: none; text-align: right; font-size: 12px; color: var(--label); }
 /* min-width: 0 overrides the intrinsic min-width of form controls: without it a
    long placeholder (相干组) keeps the input at its content width and the row
    overflows the side panel. */
@@ -81,35 +143,35 @@ button:hover, select:hover { border-color: var(--accent); }
 .prow input[type=text] { flex: 1; min-width: 0; }
 /* min-width:0 允许 select 收缩到最长选项以下，否则会顶破面板外框 */
 .prow select { flex: 1; min-width: 0; text-overflow: ellipsis; }
-.hint { color: #5a7d9e; font-size: 11px; margin: 6px 0 0; }
+.hint { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
 
 /* canvas */
 #viewTabs { display: flex; gap: 6px; flex-wrap: wrap; }
-#viewTabs button.active { background: #cfe3f7; border-color: var(--accent); }
+#viewTabs button.active { background: var(--sel); border-color: var(--accent); }
 #channelBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-#channelBar label { color: #4a6d8f; }
+#channelBar label { color: var(--label); }
 #channelBar select { max-width: 240px; }
 #channelBar input[type=range] { width: 120px; }
 #canvasWrap { position: relative; flex: 1; min-height: 170px; display: flex; align-items: center; justify-content: center;
-  background: #bfe0f3; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  background: var(--canvas-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 #view { max-width: 100%; max-height: 100%; image-rendering: pixelated; cursor: crosshair; }
 #view3d { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #view3d.dragging { cursor: grabbing; }
-#view3dHint { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #3d6285;
-  background: rgba(251,253,255,.85); border-radius: 6px; padding: 3px 7px;
+#view3dHint { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: var(--muted2);
+  background: var(--chip-bg-soft); border-radius: 6px; padding: 3px 7px;
   display: flex; align-items: center; gap: 8px; }
-#view3dHint button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: #6b8399;
-  background: transparent; border: 1px solid rgba(120,150,175,.5); border-radius: 4px;
+#view3dHint button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: var(--mini-fg);
+  background: transparent; border: 1px solid var(--mini-border); border-radius: 4px;
   box-shadow: none; opacity: .75; }
-#view3dHint button.mini:hover { opacity: 1; color: #2c4b68; border-color: rgba(90,125,158,.9); background: rgba(233,242,250,.9); }
+#view3dHint button.mini:hover { opacity: 1; color: var(--mini-hover-fg); border-color: var(--mini-hover-border); background: var(--mini-hover-bg); }
 #prof { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #planeNav { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
-  background: rgba(251,253,255,.9); border-radius: 6px; padding: 4px; }
-#stats { font-size: 12px; color: #33475c; white-space: pre-line; }
+  background: var(--chip-bg); border-radius: 6px; padding: 4px; }
+#stats { font-size: 12px; color: var(--ink); white-space: pre-line; }
 #stats b { color: var(--fg); }
 
 /* readout under the image */
-#inspectBox { display: flex; gap: 12px; align-items: flex-start; font-size: 12px; color: #33475c; padding-bottom: 4px; }
+#inspectBox { display: flex; gap: 12px; align-items: flex-start; font-size: 12px; color: var(--ink); padding-bottom: 4px; }
 #inspectBox .cards { display: flex; gap: 14px; flex-wrap: wrap; flex: 1; }
 #inspectBox .card { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 150px; }
 #inspectBox .card b { display: block; color: var(--accent); font-size: 12px; margin-bottom: 3px; }
@@ -121,25 +183,25 @@ button:hover, select:hover { border-color: var(--accent); }
 #sceneList, #sourceList { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; max-height: 34vh; overflow-y: auto; }
 .sc { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
   margin: 0; padding: 4px 8px; border-radius: 5px; background: var(--panel2); }
-.sc.sel { background: #cfe3f7; border-color: var(--accent); }
+.sc.sel { background: var(--sel); border-color: var(--accent); }
 .sc .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; border: 1px solid rgba(20,50,70,.35); }
-.sc .tag { color: #5a7d9e; font-size: 11px; margin-left: auto; white-space: nowrap; }
-.subhead { font-size: 12px; color: #4a6d8f; margin: 8px 0 2px; }
+.sc .tag { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+.subhead { font-size: 12px; color: var(--label); margin: 8px 0 2px; }
 
 
 /* right column */
-#warnings .w { background: #fdf3dd; border-left: 3px solid var(--warn); padding: 4px 8px; margin: 4px 0; border-radius: 4px; font-size: 12px; }
-#warnings .errbox { background: #fdeaea; border-left: 3px solid var(--err); padding: 4px 8px; border-radius: 4px; }
+#warnings .w { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 4px 8px; margin: 4px 0; border-radius: 4px; font-size: 12px; }
+#warnings .errbox { background: var(--err-bg); border-left: 3px solid var(--err); padding: 4px 8px; border-radius: 4px; }
 
 footer {
   background: var(--panel); border-top: 1px solid var(--border);
-  padding: 5px 14px; font-size: 11px; color: #5a7d9e;
+  padding: 5px 14px; font-size: 11px; color: var(--muted);
   backdrop-filter: blur(14px) saturate(150%);
   -webkit-backdrop-filter: blur(14px) saturate(150%);
 }
 
 /* overlays */
-.overlay { position: fixed; inset: 0; background: rgba(20,50,70,.45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.overlay { position: fixed; inset: 0; background: var(--overlay-bg); display: flex; align-items: center; justify-content: center; z-index: 50; }
 /* hidden 属性必须压过上面的 display:flex，否则对话框在页面加载时全部可见 */
 .overlay[hidden] { display: none; }
 .dialog {
@@ -147,7 +209,7 @@ footer {
   max-width: 640px; width: 90%; max-height: 85vh; overflow-y: auto;
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
-  box-shadow: 0 12px 40px rgba(20, 50, 70, 0.25);
+  box-shadow: 0 12px 40px var(--shadow);
 }
 .dialog.wide { max-width: 980px; }
 .dialog h2 { margin-top: 0; }
@@ -167,10 +229,10 @@ footer {
 /* scripted elements (元件定义文件): definition link + mask preview */
 .previewBlock { margin: 4px 0 2px; }
 .previewHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: #6b8399;
-  background: transparent; border: 1px solid rgba(120,150,175,.5); border-radius: 4px; opacity: .85; }
-button.mini:hover { opacity: 1; color: #2c4b68; border-color: rgba(90,125,158,.9); background: rgba(233,242,250,.9); }
-button.mini.active { color: #14324a; border-color: var(--accent); background: #cfe3f7; opacity: 1; }
+button.mini { font-size: 10px; line-height: 1.4; padding: 1px 6px; color: var(--mini-fg);
+  background: transparent; border: 1px solid var(--mini-border); border-radius: 4px; opacity: .85; }
+button.mini:hover { opacity: 1; color: var(--mini-hover-fg); border-color: var(--mini-hover-border); background: var(--mini-hover-bg); }
+button.mini.active { color: var(--fg); border-color: var(--accent); background: var(--sel); opacity: 1; }
 .previewBlock .previewHead .hint { margin: 0; word-break: break-all; }
 .previewImgs { display: flex; gap: 8px; margin-top: 6px; }
 .previewImgs > div { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-width: 0; }
@@ -179,22 +241,89 @@ button.mini.active { color: #14324a; border-color: var(--accent); background: #c
 
 /* quantum optics */
 .modeSwitch { display: flex; gap: 4px; }
-.modeSwitch button.active { background: #cfe3f7; border-color: var(--accent); }
+.modeSwitch button.active { background: var(--sel); border-color: var(--accent); }
 #qResults { display: flex; flex-direction: column; gap: 10px; }
 .qcard { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
 .qcard h3 { margin: 0 0 6px; font-size: 13px; color: var(--accent); }
 .qgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
 .qbar { height: 14px; background: var(--accent); border-radius: 3px; min-width: 1px; }
 .qbarRow { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-size: 12px; }
-.qbarRow .n { width: 22px; text-align: right; color: #5a7d9e; }
-.qbarRow .p { width: 64px; color: #4a6d8f; font-variant-numeric: tabular-nums; }
+.qbarRow .n { width: 22px; text-align: right; color: var(--muted); }
+.qbarRow .p { width: 64px; color: var(--label); font-variant-numeric: tabular-nums; }
 .qtable { border-collapse: collapse; font-size: 12px; }
 .qtable td, .qtable th { border: 1px solid var(--border); padding: 3px 8px; text-align: right; font-variant-numeric: tabular-nums; }
-.qtable th { color: #4a6d8f; font-weight: 600; }
+.qtable th { color: var(--label); font-weight: 600; }
 .gateRow { border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin: 6px 0; background: var(--panel2); }
 .gateRow .ghead { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
 .gateRow .ghead select { flex: 1; min-width: 0; text-overflow: ellipsis; }
 .gateRow .ghead button { flex: none; }
+
+/* 启动画面：全屏题名，一条横线落在 40% 高度处，下面是说明文字。
+   打开约 1 秒后自动淡出（点击 / Enter / Esc 可立即跳过）。 */
+.splash {
+  position: fixed; inset: 0; z-index: 200; cursor: pointer; user-select: none;
+  background: var(--body-bg); color: var(--fg);
+  opacity: 1; transition: opacity .5s ease;
+}
+html[data-theme="dark"] .splash {
+  background:
+    radial-gradient(900px 600px at 50% 0%, rgba(20, 48, 80, 0.55), transparent 65%),
+    linear-gradient(160deg, #04070c 0%, #000 60%, #04070c 100%);
+}
+.splash[hidden] { display: none; }
+.splash.leaving { opacity: 0; pointer-events: none; }
+
+/* 整块（副标题 + 题名 + 横线 + 说明）作为一个整体在视口里上下居中。 */
+.splashInner { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; }
+.splashMast {
+  flex: 0 0 auto; padding: 0 24px 26px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.splashSub {
+  margin: 0 0 14px; font-size: clamp(10px, 1.05vw, 14px); font-weight: 600;
+  letter-spacing: .42em; text-indent: .42em; text-transform: uppercase; color: var(--muted);
+}
+.splashTitle {
+  margin: 0; font-family: 'Rajdhani', "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700; font-size: clamp(32px, 7.4vw, 94px); line-height: 1;
+  letter-spacing: .14em; text-indent: .14em; text-transform: uppercase;
+  color: var(--accent); text-shadow: 0 0 34px rgba(25, 118, 210, 0.35);
+}
+html[data-theme="dark"] .splashTitle { text-shadow: 0 0 42px rgba(77, 184, 255, 0.5); }
+
+/* 「一条线」：真正的 1px 横线（两端渐隐），不再是一排短横字符。 */
+.splashRule {
+  flex: none; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 15%, var(--accent) 85%, transparent);
+  opacity: .6;
+}
+
+.splashFoot { flex: 0 0 auto; padding: 30px 24px 0; display: flex; justify-content: center; }
+.splashQuote {
+  margin: 0; max-width: 680px; text-align: center;
+  font-size: clamp(12px, 1.35vw, 15px); line-height: 2; letter-spacing: .06em;
+  color: var(--fg); opacity: .82;
+}
+
+/* 主界面右上角的主题开关（原先在启动画面上的滑块已移到 header 里）。 */
+.themeToggle {
+  margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; font-size: 12px; color: var(--muted); user-select: none;
+}
+.themeToggle:hover { color: var(--fg); }
+.themeToggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.themeToggle .track {
+  position: relative; width: 38px; height: 20px; border-radius: 999px; flex: none;
+  background: rgba(25, 118, 210, 0.22); border: 1px solid var(--border);
+  transition: background .18s ease;
+}
+.themeToggle .knob {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform .18s ease;
+}
+.themeToggle input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.themeToggle input:checked + .track .knob { transform: translateX(18px); }
+.themeToggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 1100px) { aside { width: 230px; } }
 @media (max-width: 700px) { #helpTable { column-count: 1; } }

@@ -67,7 +67,7 @@
 
 **不想写 Go 源码？** 见 §4.1：把元件的相位/振幅写成 elements/*.json 里的表达式，加载即用；定型后可以用 `wos -gen-go` 转成本节的这种原生实现。
 
-以“柱面透镜”为例（只在一个方向聚焦）：
+以“柱面透镜”为例（只在一个方向聚焦）——它已经是内置元件 `cylindrical_lens`（参数：`f` / `rotation` / `aperture` / `x` / `y`），也是「衍射光栅光谱」模板把每个级次拉成一条谱线的关键元件；下面就是它的实现（实际源码在 optics/elements.go）：
 
 **第 1 步**：在 optics/elements.go 定义实现（实现 Element 接口的 Apply）：
 

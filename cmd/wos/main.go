@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -29,6 +30,13 @@ import (
 
 //go:embed web
 var webFS embed.FS
+
+// The embedded GUI ships a vendored web font; register its MIME type so the
+// file server answers with font/woff2 instead of sniffing an octet-stream.
+func init() {
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+	_ = mime.AddExtensionType(".woff", "font/woff")
+}
 
 func main() {
 	addr := flag.String("addr", ":1120", "listen address")

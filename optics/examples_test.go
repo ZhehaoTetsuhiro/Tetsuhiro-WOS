@@ -140,9 +140,10 @@ func TestSceneExampleTwoSourcesAreIncoherent(t *testing.T) {
 
 // TestExampleGratingSpectrumOrders verifies the grating preset really shows a
 // grating spectrum: the seven wavelengths must be dispersed into the focal
-// plane by the Fourier lens (x_q = q·f·λ/Λ), each ±1 order carrying the
-// Raman-Nath weight J_q(m/2)² divided between them, and the detector must
-// collect the source power.
+// plane by the (cylindrical) Fourier lens (x_q = q·f·λ/Λ), each ±1 order
+// carrying the Raman-Nath weight J_q(m/2)² divided between them, every order
+// a line perpendicular to the dispersion (the pattern is invariant along the
+// grooves), and the detector must collect the source power.
 //
 // This is the regression test for the preset that used to be an element train
 // ending in a 1 m fraunhofer propagation. Once the GUI converted element trains
@@ -298,6 +299,29 @@ func TestExampleGratingSpectrumOrders(t *testing.T) {
 	// (5) Energy: no element absorbs, and the detector spans the window.
 	if rel := math.Abs(pl.Stats.Power-1e-3) / 1e-3; rel > 0.01 {
 		t.Errorf("detector power %.6g W, want ~1e-3 W", pl.Stats.Power)
+	}
+	// (6) Every order is a line perpendicular to the dispersion, not a point:
+	//     the pattern must be invariant along the groove direction (y). A
+	//     spherical Fourier lens focuses y as well and squeezes each order into
+	//     λf/W_y ≈ 40 µm, i.e. a dot; the preset therefore uses a cylindrical
+	//     lens, and this assertion is what would catch a regression back to a
+	//     spherical one.
+	tot := pl.TotalIntensity()
+	n := pl.Size
+	j0 := n / 2
+	for _, x := range []float64{0, xq(1, 0.55e-6)} {
+		i := centre(x)
+		ref := tot[j0*n+i]
+		if ref <= 0 {
+			t.Errorf("no light at x = %.2f mm", x*1e3)
+			continue
+		}
+		for _, dy := range []int{-n / 8, n / 8} {
+			if r := tot[(j0+dy)*n+i] / ref; r < 0.98 || r > 1.02 {
+				t.Errorf("at x = %.2f mm I(y = %+.2f mm)/I(y = 0) = %.3f: the order is not a line along y (a spherical lens focuses y and gives a point)",
+					x*1e3, float64(dy)*pl.DX*1e3, r)
+			}
+		}
 	}
 }
 

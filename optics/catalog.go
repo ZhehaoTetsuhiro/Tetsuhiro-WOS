@@ -258,6 +258,14 @@ var ElementDocs = []ElementDoc{
 			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
 			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
 		}},
+	{Type: "cylindrical_lens", Label: "柱面透镜", Help: "只在一个方向聚焦：相位 exp(-i k u²/(2f))，u 为旋转角指定的平面方向，与之垂直的方向完全不改变（一维/柱面几何的原语：把光栅的色散方向聚焦成谱线，沟槽方向保持不变）。",
+		Params: []ParamSpec{
+			fp("f", "焦距", "m", -100, 100, 1e-3, 0.1, "沿 u 方向：f>0 会聚，f<0 发散"),
+			fp("rotation", "作用方向", "rad", -3.1416, 3.1416, 0.01, 0, "u = cosθ·x + sinθ·y；0 = 沿 x 聚焦（y 方向不变），π/2 = 沿 y 聚焦"),
+			fp("aperture", "孔径半径", "m", 0, 0.05, 1e-4, 0, "0 表示无孔径（圆孔半径）"),
+			fp("x", "中心 x", "m", -0.05, 0.05, 1e-4, 0, ""),
+			fp("y", "中心 y", "m", -0.05, 0.05, 1e-4, 0, ""),
+		}},
 	{Type: "aperture", Label: "孔径光阑", Help: "透射孔径：圆孔/方孔/矩孔/椭圆孔/三角孔/环形/多边形/双缝/十字/星形/超椭圆，亦可用顶点列表自定义；切换形状后仅显示该形状对应的参数。",
 		Params: []ParamSpec{
 			cp("shape", "形状", []string{"circle", "square", "rectangle", "ellipse", "triangle", "ring", "polygon", "double_slit", "cross", "star", "superellipse", "slit", "custom"}, "circle", "选择孔径形状；不同形状显示不同的参数"),
@@ -581,7 +589,14 @@ func sceneExamples(bl *BandlimitOpts) []Example {
 	// window is the aperture. A lens maps the orders to the focal plane at
 	// f·λ/Λ, where they are both inside the window and resolved.
 	//
-	// A single monochromatic wave gives one point per order — that is what a
+	// The lens is *cylindrical* (power along x only): a spherical lens focuses
+	// the y direction too, which would squeeze every order into a point of
+	// λf/W_y ≈ 40 µm — the 1-D pattern of a grating is invariant along the
+	// grooves, so each order must be drawn out into a line perpendicular to the
+	// dispersion instead (the cylindrical lens leaves y untouched, and the
+	// y-invariance of plane-wave illumination survives to the focal plane).
+	//
+	// A single monochromatic wave gives one line per order — that is what a
 	// laser and a grating really do — so the preset carries seven wavelengths
 	// (405…700 nm, 1/7 of the power each, independent units) and every order
 	// is drawn out into a coloured strip: f·(λmax−λmin)/Λ = 0.89 mm wide, blue
@@ -604,8 +619,8 @@ func sceneExamples(bl *BandlimitOpts) []Example {
 	gs.Scene = &SceneSpec{Components: []ComponentSpec{
 		{ID: "grating", Type: "grating", Label: "衍射光栅", Pos: v3(0, 0, 0),
 			Params: map[string]any{"kind": "phase_sin", "period": 1e-4, "modulation": 2.0}},
-		{ID: "lens", Type: "lens", Label: "傅里叶透镜", Pos: v3(0, 0, 0.02),
-			Params: map[string]any{"f": 0.3}},
+		{ID: "lens", Type: "cylindrical_lens", Label: "柱面傅里叶透镜", Pos: v3(0, 0, 0.02),
+			Params: map[string]any{"f": 0.3, "rotation": 0}},
 		{ID: "det", Type: "sensor", Label: "衍射级（焦面）", Pos: v3(0, 0, 0.32), Yaw: math.Pi,
 			Shape: &ShapeSpec{Kind: "rectangle", Params: map[string]any{"width": 0.008, "height": 0.008}}},
 	}}

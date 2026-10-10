@@ -195,8 +195,17 @@ function renderSceneList() {
     box.appendChild(b);
   });
   if (S.compSel >= list.length) S.compSel = Math.max(0, list.length - 1);
-  const sel = box.querySelector(".sel");
-  if (sel) sel.scrollIntoView({ block: "nearest" });
+  keepInList(box, box.querySelector(".sel"));
+}
+
+// keepInList 把列表里的当前项滚动到列表自己的可视区内，只改这个容器的
+// scrollTop：scrollIntoView 会连同可滚动祖先（左栏 aside）一起滚动，于是点
+// 「删除」后左栏会跳回顶部——这正是要避免的。
+function keepInList(box, el) {
+  if (!box || !el) return;
+  const b = box.getBoundingClientRect(), e = el.getBoundingClientRect();
+  if (e.top < b.top) box.scrollTop -= b.top - e.top;
+  else if (e.bottom > b.bottom) box.scrollTop += e.bottom - b.bottom;
 }
 
 function classOf(type) {
@@ -260,6 +269,7 @@ function renderSourceList() {
     box.appendChild(b);
   });
   if (S.srcSel >= list.length) S.srcSel = Math.max(0, list.length - 1);
+  keepInList(box, box.querySelector(".sel"));
 }
 
 // 波长 → 显示颜色（与服务端 CIE 拟合一致的近似，仅用于列表色点与立体视图）。
@@ -1029,12 +1039,23 @@ function paintView() {
   if (!p || !lastImg) return;
   const n = p.size;
   cv.width = n; cv.height = n;
+  applyViewScaling(cv, n);
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, n, n);
   ctx.drawImage(lastImg, 0, 0);
   if (S.view === "pol" && S.showPol) drawPolEllipses(ctx, n);
   if (S.inspectXY) drawPickMarker(ctx, S.inspectXY[0], S.inspectXY[1], n);
   drawProfile();
+}
+
+// 画布比显示框大时要缩小显示：此时 pixelated 的最近邻抽样会把 1–2 px 宽的
+// 结构（如光栅的谱线）整条丢掉，只剩中心最亮的点——改用平滑缩放（面积平均）
+// 让细线变暗但不消失。画布不超过显示框（原尺寸或放大）时仍用 pixelated，
+// 保持数据像素锐利。
+function applyViewScaling(cv, n) {
+  if (!cv) return;
+  const fits = n <= cv.clientWidth + 0.5 && n <= cv.clientHeight + 0.5;
+  cv.style.imageRendering = fits ? "pixelated" : "auto";
 }
 
 // 偏振椭圆叠加：一次读入方位角/椭率/偏振度（float32 二进制），按网格画椭圆。
@@ -2015,6 +2036,16 @@ document.addEventListener("keydown", (e) => {
   const t = e.target;
   const tag = t.tagName;
   const inField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+  // 启动画面：任意键进入（滑块上的空格留给滑块自己切换主题）。
+  const splash = $("#splash");
+  if (splash && !splash.hidden) {
+    if (e.key === " " && t && t.id === "themeSwitch") return;
+    if (e.key === "Enter" || e.key === "Escape" || e.key === " ") {
+      e.preventDefault();
+      hideSplash();
+    }
+    return;
+  }
   if (!$("#helpOverlay").hidden) {
     if (e.key === "Escape") closeHelp();
     return;
@@ -2614,9 +2645,27 @@ function wireUI() {
   $("#qExportSvg").addEventListener("click", qExportSvg);
   $("#jsonApply").addEventListener("click", applyJson);
   $("#jsonClose").addEventListener("click", closeJson);
+  const splash = $("#splash");
+  if (splash) {
+    // 点击任意处立即进入；否则启动画面在 1 秒后自动淡出。
+    splash.addEventListener("click", () => hideSplash());
+    setTimeout(hideSplash, 1000);
+  }
+  const themeSwitch = $("#themeSwitch");
+  if (themeSwitch) {
+    themeSwitch.addEventListener("change", (e) => {
+      e.stopPropagation();
+      applyTheme(e.target.checked ? "dark" : "light");
+    });
+  }
   window.addEventListener("resize", () => {
     if (S.view === "scene3d") render3D();
-    else { drawProfile(); if (S.view === "pol") redrawView(); }
+    else {
+      const p = curPlane();
+      if (p) applyViewScaling($("#view"), p.size); // 显示框大小变了：重定锐利/平滑
+      drawProfile();
+      if (S.view === "pol") redrawView();
+    }
   });
 }
 
@@ -2625,6 +2674,32 @@ function renderProfileBtn() {
   if (!b) return;
   b.classList.toggle("active", !!S.profileAxis);
   b.textContent = S.profileAxis ? "p 剖面 " + (S.profileAxis === "x" ? "横向" : "纵向") : "p 剖面";
+}
+
+// ---------------- 主题与启动画面 ----------------
+
+// 浅色＝天蓝色主色调（默认），暗色＝黑底 + 蓝色系；选择记在 localStorage 里，
+// 下次打开沿用。主题开关在主界面 header 的右上角。
+const THEME_KEY = "twos-theme";
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light"; } catch (e) { return "light"; }
+}
+
+// applyTheme 切换整个界面的主题并记住选择。
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* 隐私模式等：忽略 */ }
+  const sw = $("#themeSwitch");
+  if (sw) sw.checked = t === "dark";
+}
+
+// hideSplash 淡出启动画面：先加 .leaving 触发过渡，过渡结束再置 hidden。
+function hideSplash() {
+  const sp = $("#splash");
+  if (!sp || sp.hidden) return;
+  sp.classList.add("leaving");
+  setTimeout(() => { sp.hidden = true; sp.classList.remove("leaving"); }, 520);
 }
 
 // ---------------- init ----------------
@@ -2642,6 +2717,7 @@ async function loadCatalog() {
 }
 
 async function init() {
+  applyTheme(currentTheme(), false); // 记住的主题先生效（启动画面随之换色）
   try {
     await loadCatalog();
   } catch (e) {
