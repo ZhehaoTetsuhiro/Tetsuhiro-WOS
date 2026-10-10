@@ -21,8 +21,8 @@
 
 本项目分两个发布通道：
 
-- **Release**（`v1.3.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
-- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.3.0`，`docker/podman run` 直接运行。
+- **Release**（`v1.4.0`）：源码 + 预编译二进制包（Linux/Windows 单文件与 zip），见 [Releases](https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/releases)。
+- **Package**（GitHub Packages 容器镜像）：`ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.4.0`，`docker/podman run` 直接运行。
 
 预编译二进制：
 
@@ -33,8 +33,8 @@
 
 容器镜像（`linux/amd64`，Alpine 基础镜像，内置 `elements/` 元件定义，默认监听 `:1120`，另有 `latest` 标签）：
 
-    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.3.0
-    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.3.0
+    docker pull ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.4.0
+    docker run -p 1120:1120 ghcr.io/zhehaotetsuhiro/tetsuhiro-wos:v1.4.0
 
 镜像由 `.github/workflows/ghcr.yml` 从标签提交用与 Release 完全相同的工具链与标志编译（`go1.25.10`、`-trimpath -ldflags="-s -w"`、`CGO_ENABLED=0`、`GOEXPERIMENT=nodwarf5`），因此**镜像里的 `wos` 与 Release 里的 `wos-linux-amd64` 逐位相同**。手工构建见 `docker/Dockerfile`。
 

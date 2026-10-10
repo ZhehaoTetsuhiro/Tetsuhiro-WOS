@@ -2,6 +2,32 @@
 
 本项目所有显著变更都会记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.4.0] - 2026-10-10
+
+本版修复两处使用中的硬伤（光栅图样退化成点、在「光源」一栏点「删除」跳回顶部），新增一维/柱面几何所需的**柱面透镜**元件，并给 GUI 加上启动画面与暗色模式。
+
+### 新增
+
+- **内置元件 `cylindrical_lens`（柱面透镜）**：相位 exp(−i·k·u²/(2f))，u = cosθ·x + sinθ·y，与之垂直的方向**完全不改变**（参数 `f` / `rotation` / `aperture` / `x` / `y`，GUI 归入「透镜」类，插入对话框可直接选）。它是一维/柱面几何的原语：只聚焦一个方向，让另一个方向保持平面波照明的不变性。docs/KERNEL.md §4「新增一种光学元件」一直拿它当教学示例，现在它就是真实实现（文档同步标注）。
+
+### 修复
+
+- **「衍射光栅光谱」模板的衍射级退化成点**。模板此前用**球面**傅里叶透镜，它在色散方向（x）与沟槽方向（y）**都**聚焦，于是每个级次被压成 λf/W_y ≈ 40 µm 的点（1024² 网格上约 5 px），看起来只剩中心一个点。一维光栅的图样沿沟槽方向严格不变，级次应当是**垂直色散方向的谱线**。现改为**柱面**傅里叶透镜（只聚焦 x，旋转 0）：级次位置与权重不变（x_q = q·f·λ/Λ、I₁/I₀ = (J₁/J₀)²/7），y 方向完全不动，于是 0 级与 ±1 级都拉成整幅竖直谱线（±1 级仍是由 7 个波长展开的 0.89 mm 彩色光谱带，蓝端 1.215 mm → 红端 2.10 mm）。
+- **左栏点「删除」会把栏目拉回顶部**。`renderSceneList()` 用 `sel.scrollIntoView({block:"nearest"})` 把当前元件保持在视野内，而 `scrollIntoView` 会连同可滚动祖先（左栏 `aside`）一起滚动：在「光源」一栏（列表在下方）点「删除」时，整栏被拉回顶部，接着还要重新往下滚。现在改为只调整列表容器**自身**的 `scrollTop`（新增 `keepInList()`，元件列表与光源列表各自在自己的框里滚动），左栏的滚动位置完全不受影响，被选中的项仍会自动保持在框内可见。
+
+### 界面
+
+- **启动画面**：打开页面全屏显示题名 `TETSUHIRO WOS`（**Rajdhani 700**，棱角分明的方切角无衬线，**随包内嵌**在 `cmd/wos/web/fonts/`）+ 一条真正的 **1 px 横线**（两端渐隐）+ 一行说明（「光走过每一条可能的路径，干涉图样是它们彼此相认的证据。」）；整块（副标题 / 题名 / 横线 / 说明）在视口里**上下居中**。画面打开约 **1 秒后自动淡出**；点任意位置或按 Enter/Esc/空格可立即进入。
+- **主题开关移到主界面**：原先放在启动画面上的「暗色模式」滑块改到 **header 右上角**，切换只换主题、不再弹回启动画面。主题选择记在 `localStorage`（`twos-theme`），下次打开沿用。
+- **暗色模式配色**：浅色保持天蓝色主色调不变；暗色为纯黑背景 + 蓝色系（面板半透明深蓝、文字浅蓝、强调色改亮天蓝 #4db8ff）。原先写死在 CSS 里的颜色（状态/hint 文字、选中项底色、图像画布底、窗口小提示、警告底色、迷你按钮、弹窗遮罩与阴影）全部改为主题变量，暗色模式整体一致。
+- 版本号升到 v1.4.0（页眉徽标）。
+
+### 校验
+
+- 新增 `optics/cylindrical_lens_test.go`：柱面相位沿垂直方向逐点相同（差 < 1e-12 rad）、沿作用方向精确等于 −k·u²/(2f)、rotation = π/2 时两轴互换、f<0 反号、可选的圆孔径内通光外挡光、f = 0 报错。
+- `optics/examples_test.go::TestExampleGratingSpectrumOrders` 增加第 (6) 条断言：0 级与 ±1 级在 y = ±1 mm 处的强度必须等于轴上值（比值 0.98–1.02，实测逐点相等）——把柱面透镜换回球面透镜会立刻让这条失败（级次退化成 40 µm 的点）。
+- `go test ./...` 全通过（optics 55.8 s、server 0.33 s），`go vet ./...`、`gofmt -l` 干净。
+
 ## [v1.3.0] - 2026-10-03
 
 本版落实下游 Light-Coding 在 `docs/04-EVIDENCE.md` §9.2–§9.7 提出的六项 WOS 上游愿望单：scene 共面元件语义、无损监视探测器、漫射体屏锚定、量子全模式联合分布与后选择、强度相关折射率/可饱和吸收元件。
@@ -305,7 +331,8 @@
 - **接入**：内核即库（`import "twos/optics"`）与 HTTP API。
 - **精度验证**：内建 18 项物理与数值测试。
 
-[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.3.0...HEAD
+[未发布]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.4.0...HEAD
+[v1.4.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.2.0...v1.3.0
 [v1.2.0]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.1...v1.2.0
 [v1.1.1]: https://github.com/ZhehaoTetsuhiro/Tetsuhiro-WOS/compare/v1.1.0...v1.1.1
